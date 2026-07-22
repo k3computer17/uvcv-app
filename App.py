@@ -115,6 +115,7 @@ FY_LIST = [
 # Sidebar Navigation
 menu = [
     "➕ Add New Client", 
+    "✏️ Edit Client Profile",
     "📅 Add / Update Financial Year Fee",
     "💵 Receive Payment",
     "🔍 Client Ledger & Credentials", 
@@ -231,7 +232,109 @@ if choice == "➕ Add New Client":
             st.success(f"✅ Client '{name}' saved successfully!")
             st.rerun()
 
-# 2. Add / Update Financial Year Fee
+# 2. Edit Client Profile
+elif choice == "✏️ Edit Client Profile":
+    st.subheader("✏️ Edit Client Details & Credentials")
+    
+    c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
+    client_rows = c.fetchall()
+    
+    if not client_rows:
+        st.warning("No clients found.")
+    else:
+        client_dict = {f"{row[1]} | PAN: {row[2]} | Mob: {row[3]}": row[0] for row in client_rows}
+        selected_client_str = st.selectbox("Select Client to Edit:", list(client_dict.keys()))
+        selected_client_id = client_dict[selected_client_str]
+        
+        c.execute("SELECT * FROM clients WHERE id = ?", (selected_client_id,))
+        c_info = c.fetchone()
+        
+        st.markdown("### 👤 Basic Profile & ITR Credentials")
+        col1, col2 = st.columns(2)
+        with col1:
+            edit_name = st.text_input("Client Full Name *", value=c_info[1] if c_info[1] else "")
+            edit_father = st.text_input("Father's Name", value=c_info[2] if c_info[2] else "")
+            edit_mobile = st.text_input("Mobile Number", value=c_info[4] if c_info[4] else "")
+            edit_address = st.text_area("Address", value=c_info[5] if c_info[5] else "")
+        
+        with col2:
+            edit_pan = st.text_input("PAN Card Number", value=c_info[3] if c_info[3] else "")
+            st.markdown("🔐 **ITR Credentials:**")
+            edit_itr_user = st.text_input("ITR Portal User ID", value=c_info[6] if c_info[6] else "")
+            edit_itr_pass = st.text_input("ITR Portal Password", value=c_info[7] if c_info[7] else "")
+        
+        if st.button("💾 Update Basic Details"):
+            c.execute('''
+                UPDATE clients 
+                SET name = ?, father_name = ?, pan_number = ?, mobile = ?, address = ?, itr_username = ?, itr_password = ?
+                WHERE id = ?
+            ''', (edit_name.strip(), edit_father, edit_pan.strip().upper(), edit_mobile, edit_address, edit_itr_user, edit_itr_pass, selected_client_id))
+            conn.commit()
+            st.success("✅ Basic Profile & ITR Details updated successfully!")
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 🏬 Manage GST Details")
+        
+        c.execute("SELECT id, gst_number, gst_username, gst_password, trade_name FROM client_gst WHERE client_id = ?", (selected_client_id,))
+        gst_records = c.fetchall()
+        
+        if gst_records:
+            for g_rec in gst_records:
+                g_id, g_num, g_user, g_pass, g_trade = g_rec
+                with st.expander(f"✏️ Edit GST: {g_num} ({g_trade if g_trade else 'No Trade Name'})"):
+                    e_g1, e_g2, e_g3, e_g4 = st.columns(4)
+                    with e_g1:
+                        up_g_num = st.text_input("GSTIN", value=g_num if g_num else "", key=f"e_gnum_{g_id}")
+                    with e_g2:
+                        up_g_user = st.text_input("User ID", value=g_user if g_user else "", key=f"e_guser_{g_id}")
+                    with e_g3:
+                        up_g_pass = st.text_input("Password", value=g_pass if g_pass else "", key=f"e_gpass_{g_id}")
+                    with e_g4:
+                        up_g_trade = st.text_input("Trade Name", value=g_trade if g_trade else "", key=f"e_gtrade_{g_id}")
+                    
+                    b1, b2 = st.columns([1, 1])
+                    with b1:
+                        if st.button("Save GST Changes", key=f"save_g_{g_id}"):
+                            c.execute('''
+                                UPDATE client_gst 
+                                SET gst_number = ?, gst_username = ?, gst_password = ?, trade_name = ?
+                                WHERE id = ?
+                            ''', (up_g_num.strip().upper(), up_g_user, up_g_pass, up_g_trade, g_id))
+                            conn.commit()
+                            st.success("GST details updated!")
+                            st.rerun()
+                    with b2:
+                        if st.button("❌ Remove GST", key=f"del_g_{g_id}"):
+                            c.execute("DELETE FROM client_gst WHERE id = ?", (g_id,))
+                            conn.commit()
+                            st.success("GST entry removed!")
+                            st.rerun()
+        else:
+            st.info("No GST numbers added for this client yet.")
+        
+        with st.expander("➕ Add New GST Entry"):
+            n_g1, n_g2, n_g3, n_g4 = st.columns(4)
+            with n_g1:
+                add_gnum = st.text_input("GSTIN", key="add_gnum")
+            with n_g2:
+                add_guser = st.text_input("User ID", key="add_guser")
+            with n_g3:
+                add_gpass = st.text_input("Password", key="add_gpass")
+            with n_g4:
+                add_gtrade = st.text_input("Trade Name", key="add_gtrade")
+            
+            if st.button("➕ Add GST Entry"):
+                if add_gnum.strip():
+                    c.execute('''
+                        INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (selected_client_id, add_gnum.strip().upper(), add_guser, add_gpass, add_gtrade))
+                    conn.commit()
+                    st.success("New GST Entry added!")
+                    st.rerun()
+
+# 3. Add / Update Financial Year Fee
 elif choice == "📅 Add / Update Financial Year Fee":
     st.subheader("📅 Manage Year-wise Fee & Return Status")
     
@@ -286,7 +389,7 @@ elif choice == "📅 Add / Update Financial Year Fee":
             st.success(f"✅ Fee & Status updated for FY {fin_year}!")
             st.rerun()
 
-# 3. Receive Payment
+# 4. Receive Payment
 elif choice == "💵 Receive Payment":
     st.subheader("💵 Receive Fee Payment")
     
@@ -335,7 +438,7 @@ elif choice == "💵 Receive Payment":
                 st.success("✅ Payment recorded successfully!")
                 st.rerun()
 
-# 4. Client Ledger, Credentials & WhatsApp Reminders
+# 5. Client Ledger, Credentials & WhatsApp Reminders
 elif choice == "🔍 Client Ledger & Credentials":
     st.subheader("🔍 Client Statement & WhatsApp Reminders")
     
@@ -411,7 +514,7 @@ elif choice == "🔍 Client Ledger & Credentials":
         else:
             st.warning("No payments recorded for this financial year yet.")
 
-# 5. Overall Business Report
+# 6. Overall Business Report
 elif choice == "📊 Overall Business Report":
     st.subheader("📊 NIKA Business Financial Dashboard")
     
@@ -449,7 +552,7 @@ elif choice == "📊 Overall Business Report":
         st.markdown(f"### 📋 Master Client Ledger (FY {selected_fy})")
         st.dataframe(master_df, use_container_width=True)
 
-# 6. Delete Entry
+# 7. Delete Entry
 elif choice == "🗑️ Delete Entry":
     st.subheader("🗑️ Delete Record")
     
