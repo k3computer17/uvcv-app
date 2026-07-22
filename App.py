@@ -318,15 +318,15 @@ elif choice == "✏️ Edit Client Profile":
 elif choice == "📅 Add / Update Financial Year Fee":
     st.subheader("📅 Manage Year-wise Fee & Return Status")
     
-    c.execute("SELECT id, name, pan_number FROM clients ORDER BY name ASC")
+    c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
     client_rows = c.fetchall()
     
     if not client_rows:
         st.warning("No clients found.")
     else:
-        client_dict = {f"{row[1]} | PAN: {row[2]}": row[0] for row in client_rows}
+        client_dict = {f"{row[1]} | PAN: {row[2]}": (row[0], row[1], row[3]) for row in client_rows}
         selected_client_str = st.selectbox("Select Client:", list(client_dict.keys()))
-        selected_client_id = client_dict[selected_client_str]
+        selected_client_id, client_name, client_mobile = client_dict[selected_client_str]
         
         fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
         
@@ -367,21 +367,28 @@ elif choice == "📅 Add / Update Financial Year Fee":
             
             conn.commit()
             st.success(f"✅ Fee & Status updated for FY {fin_year}!")
-            st.rerun()
+
+            # Auto WhatsApp Confirmation Link for Return Filing Status
+            if income_tax_status == "Filed" or gst_status == "Filed":
+                msg_filed = f"नमस्ते {client_name} जी,\n\nआपका वित्तीय वर्ष {fin_year} का रिटर्न सफलतापूर्वक फाइल (Filed) कर दिया गया है।\n\nNIKA Tax Services की सेवाओं का उपयोग करने के लिए धन्यवाद!\n\nसंपर्क: {MY_CONTACT}"
+                url_filed = create_whatsapp_link(client_mobile, msg_filed)
+                if url_filed:
+                    st.info("📲 क्लाइंट को रिटर्न फाइलिंग की व्हाट्सएप सूचना भेजें:")
+                    st.link_button("💬 Send Return Filed Confirmation on WhatsApp", url_filed, use_container_width=True)
 
 # 4. Receive Payment
 elif choice == "💵 Receive Payment":
     st.subheader("💵 Receive Fee Payment")
     
-    c.execute("SELECT id, name, pan_number FROM clients ORDER BY name ASC")
+    c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
     client_rows = c.fetchall()
     
     if not client_rows:
         st.warning("No clients found.")
     else:
-        client_dict = {f"{row[1]} | PAN: {row[2]}": row[0] for row in client_rows}
+        client_dict = {f"{row[1]} | PAN: {row[2]}": (row[0], row[1], row[3]) for row in client_rows}
         selected_client_str = st.selectbox("Select Client:", list(client_dict.keys()))
-        selected_client_id = client_dict[selected_client_str]
+        selected_client_id, client_name, client_mobile = client_dict[selected_client_str]
         
         fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
         
@@ -415,8 +422,17 @@ elif choice == "💵 Receive Payment":
                     VALUES (?, ?, ?, ?, ?, ?)
                 ''', (selected_client_id, fin_year, payment_date, payment_amount, payment_mode, remarks))
                 conn.commit()
-                st.success("✅ Payment recorded successfully!")
-                st.rerun()
+                
+                new_balance = current_balance - payment_amount
+                st.success(f"✅ ₹{payment_amount:,.2f} Payment recorded successfully!")
+
+                # Auto WhatsApp Payment Receipt Link
+                msg_receipt = f"नमस्ते {client_name} जी,\n\nवित्तीय वर्ष {fin_year} के लिए आपका ₹{payment_amount:,.2f} का पेमेंट प्राप्त हो गया है।\n\n📌 **पेमेंट मोड:** {payment_mode}\n📌 **बकाया राशि (Remaining Due):** ₹{new_balance:,.2f}\n\nधन्यवाद!\n- NIKA Tax Services\nसंपर्क: {MY_CONTACT}"
+                url_receipt = create_whatsapp_link(client_mobile, msg_receipt)
+                
+                if url_receipt:
+                    st.info("📲 क्लाइंट को पेमेंट रसीद व्हाट्सएप पर भेजने के लिए नीचे क्लिक करें:")
+                    st.link_button("💬 Send Payment Receipt on WhatsApp", url_receipt, use_container_width=True)
 
 # 5. Client Ledger, Credentials & WhatsApp Reminders
 elif choice == "🔍 Client Ledger & Credentials":
@@ -589,4 +605,5 @@ elif choice == "🗑️ Delete Entry":
                 conn.commit()
                 st.success("Payment entry deleted!")
                 st.rerun()
+
 
