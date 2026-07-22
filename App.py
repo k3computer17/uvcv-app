@@ -35,11 +35,11 @@ st.markdown("""
 
 st.title("🏢 NIKA - Client Management & WhatsApp Reminder System")
 
-# Database Setup - Reconnecting to v2 to preserve existing data
+# Database Setup
 conn = sqlite3.connect('nika_clients_v2.db', check_same_thread=False)
 c = conn.cursor()
 
-# Auto Migration: Check and add missing columns to clients table safely
+# Migration: Check and rename columns if needed
 c.execute("PRAGMA table_info(clients)")
 columns = [col[1] for col in c.fetchall()]
 
@@ -48,7 +48,7 @@ if 'itr_username' not in columns and 'portal_username' in columns:
 if 'itr_password' not in columns and 'portal_password' in columns:
     c.execute("ALTER TABLE clients RENAME COLUMN portal_password TO itr_password")
 
-# 1. Clients Master Table Schema
+# 1. Clients Master Table
 c.execute('''
     CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +63,7 @@ c.execute('''
     )
 ''')
 
-# 2. Client GST Table (Supports Multiple GST)
+# 2. Client GST Table
 c.execute('''
     CREATE TABLE IF NOT EXISTS client_gst (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,7 +76,7 @@ c.execute('''
     )
 ''')
 
-# 3. Client Year-wise Fee & Return Status Table
+# 3. Client Years Table
 c.execute('''
     CREATE TABLE IF NOT EXISTS client_years (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,7 +105,7 @@ c.execute('''
 ''')
 conn.commit()
 
-# 10 Financial Years List
+# Financial Years List
 FY_LIST = [
     "2020-2021", "2021-2022", "2022-2023", "2023-2024", 
     "2024-2025", "2025-2026", "2026-2027", "2027-2028", 
@@ -124,19 +124,20 @@ menu = [
 ]
 choice = st.sidebar.radio("NIKA Menu", menu)
 
-# Session state initialization for dynamic GST fields
 if "num_gst_fields" not in st.session_state:
     st.session_state.num_gst_fields = 1
 
-# Helper function for WhatsApp Link Creation
-def create_whatsapp_link(mobile, message):
-    if not mobile:
+# Updated Helper function for Universal WhatsApp Link
+def create_whatsapp_link(client_mobile, message):
+    if not client_mobile:
         return None
-    clean_mobile = "".join(filter(str.isdigit, str(mobile)))
+    clean_mobile = "".join(filter(str.isdigit, str(client_mobile)))
     if len(clean_mobile) == 10:
         clean_mobile = "91" + clean_mobile
     encoded_msg = urllib.parse.quote(message)
-    return f"https://wa.me/{clean_mobile}?text={encoded_msg}"
+    return f"https://api.whatsapp.com/send?phone={clean_mobile}&text={encoded_msg}"
+
+MY_CONTACT = "8358013017"
 
 # 1. Add New Client Profile
 if choice == "➕ Add New Client":
@@ -312,27 +313,6 @@ elif choice == "✏️ Edit Client Profile":
                             st.rerun()
         else:
             st.info("No GST numbers added for this client yet.")
-        
-        with st.expander("➕ Add New GST Entry"):
-            n_g1, n_g2, n_g3, n_g4 = st.columns(4)
-            with n_g1:
-                add_gnum = st.text_input("GSTIN", key="add_gnum")
-            with n_g2:
-                add_guser = st.text_input("User ID", key="add_guser")
-            with n_g3:
-                add_gpass = st.text_input("Password", key="add_gpass")
-            with n_g4:
-                add_gtrade = st.text_input("Trade Name", key="add_gtrade")
-            
-            if st.button("➕ Add GST Entry"):
-                if add_gnum.strip():
-                    c.execute('''
-                        INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (selected_client_id, add_gnum.strip().upper(), add_guser, add_gpass, add_gtrade))
-                    conn.commit()
-                    st.success("New GST Entry added!")
-                    st.rerun()
 
 # 3. Add / Update Financial Year Fee
 elif choice == "📅 Add / Update Financial Year Fee":
@@ -440,7 +420,7 @@ elif choice == "💵 Receive Payment":
 
 # 5. Client Ledger, Credentials & WhatsApp Reminders
 elif choice == "🔍 Client Ledger & Credentials":
-    st.subheader("🔍 Client Statement & WhatsApp Reminders")
+    st.subheader("🔍 Client Statement & Quick WhatsApp Reminders")
     
     c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
     client_list = c.fetchall()
@@ -470,8 +450,6 @@ elif choice == "🔍 Client Ledger & Credentials":
         c.execute("SELECT annual_fee, income_tax_status, gst_status FROM client_years WHERE client_id = ? AND financial_year = ?", (client_id, fin_year))
         year_info = c.fetchone()
         annual_fee = year_info[0] if year_info else 0.0
-        itr_status = year_info[1] if year_info else "Pending"
-        gst_status = year_info[2] if year_info else "Pending"
         
         df_payments = pd.read_sql_query('''
             SELECT payment_date as 'Date', amount_paid as 'Amount Paid (₹)', payment_mode as 'Mode', remarks as 'Remarks'
@@ -487,25 +465,47 @@ elif choice == "🔍 Client Ledger & Credentials":
         m2.metric("Total Received", f"₹{total_paid:,.2f}")
         m3.metric("Remaining Due", f"₹{remaining_balance:,.2f}" if remaining_balance > 0 else "₹0.00")
 
-        # WhatsApp Reminder Section
+        # Ready-made WhatsApp Options Section
         st.markdown("---")
-        st.markdown("### 📲 Send WhatsApp Reminders:")
+        st.markdown("### 📲 Choose Reminder Option to Send on WhatsApp:")
         
-        rem_col1, rem_col2 = st.columns(2)
-        
-        with rem_col1:
-            fee_msg = f"नमस्ते {client_name} जी,\nवित्तीय वर्ष {fin_year} की आपकी टैक्स/एकाउंटिंग फ़ीस में ₹{remaining_balance:,.2f} की राशि बकाया है। कृपया शीघ्र भुगतान करने का कष्ट करें।\nधन्यवाद!\n- NIKA Tax Services"
-            wa_fee_url = create_whatsapp_link(client_mobile, fee_msg)
-            if wa_fee_url and remaining_balance > 0:
-                st.markdown(f'<a href="{wa_fee_url}" target="_blank"><button style="background-color:#25D366;color:white;padding:10px;border-radius:8px;border:none;width:100%;font-weight:bold;">💬 Send Payment Reminder</button></a>', unsafe_allow_html=True)
-            else:
-                st.caption("No Pending Fee or Mobile Number Missing.")
+        if not client_mobile:
+            st.error("⚠️ Client Mobile Number is missing! Please edit client profile to add mobile number.")
+        else:
+            r1, r2 = st.columns(2)
+            
+            with r1:
+                # Option 1: Payment Due Message
+                msg_pay = f"नमस्ते {client_name} जी,\n\nआपका वित्तीय वर्ष {fin_year} का टैक्स/अकाउंटिंग फ़ीस में ₹{remaining_balance:,.2f} का भुगतान अभी तक नहीं हुआ है।\n\nकृपया जल्द से जल्द भुगतान करने का कष्ट करें।\n\nसंपर्क: {MY_CONTACT}\nधन्यवाद!\n- NIKA Tax Services"
+                url_pay = create_whatsapp_link(client_mobile, msg_pay)
+                st.markdown("#### Option 1: Payment Reminder")
+                st.caption(f"**मैसेज Preview:** ₹{remaining_balance:,.2f} का भुगतान नहीं हुआ है...")
+                st.link_button("💬 1. Send Payment Pending Warning", url_pay, use_container_width=True)
 
-        with rem_col2:
-            ret_msg = f"नमस्ते {client_name} जी,\nवित्तीय वर्ष {fin_year} के आपके टैक्स रिटर्न/GST फाइलिंग के दस्तावेज (Documents) लंबित हैं। कृपया जल्द से जल्द भेजें ताकि समय पर रिटर्न फाइल किया जा सके।\nधन्यवाद!\n- NIKA Tax Services"
-            wa_ret_url = create_whatsapp_link(client_mobile, ret_msg)
-            if wa_ret_url:
-                st.markdown(f'<a href="{wa_ret_url}" target="_blank"><button style="background-color:#075E54;color:white;padding:10px;border-radius:8px;border:none;width:100%;font-weight:bold;">📄 Send Return/Doc Reminder</button></a>', unsafe_allow_html=True)
+                st.markdown("---")
+
+                # Option 3: Both Payment & Return Message
+                msg_both = f"नमस्ते {client_name} जी,\n\nआपका वित्तीय वर्ष {fin_year} का टैक्स रिटर्न भी नहीं भरा गया है और ₹{remaining_balance:,.2f} का पेमेंट भी बकाया है।\n\nकृपया डॉक्युमेंट्स भेजकर भुगतान पूर्ण करें।\n\nसंपर्क: {MY_CONTACT}\nधन्यवाद!\n- NIKA Tax Services"
+                url_both = create_whatsapp_link(client_mobile, msg_both)
+                st.markdown("#### Option 3: Both Payment & Return Pending")
+                st.caption(f"**मैसेज Preview:** रिटर्न नहीं भरा है और ₹{remaining_balance:,.2f} पेमेंट भी बकाया है...")
+                st.link_button("⚠️ 3. Send Payment + Return Both Pending", url_both, use_container_width=True)
+
+            with r2:
+                # Option 2: Return Pending Message
+                msg_ret = f"नमस्ते {client_name} जी,\n\nआपका वित्तीय वर्ष {fin_year} का टैक्स/GST रिटर्न अभी तक नहीं भरा गया है क्योंकि आपके दस्तावेज़ (Documents) पेंडिंग हैं।\n\nकृपया जल्द से जल्द दस्तावेज़ भेजने का कष्ट करें।\n\nसंपर्क: {MY_CONTACT}\nधन्यवाद!\n- NIKA Tax Services"
+                url_ret = create_whatsapp_link(client_mobile, msg_ret)
+                st.markdown("#### Option 2: Return Documents Pending")
+                st.caption("**मैसेज Preview:** आपका रिटर्न अभी तक नहीं भरा गया है...")
+                st.link_button("📄 2. Send Return/Docs Pending Warning", url_ret, use_container_width=True)
+
+                st.markdown("---")
+
+                # Option 4: Custom Message Input
+                st.markdown("#### Option 4: Write Custom Message")
+                custom_txt = st.text_input("लिखें जो मैसेज आप भेजना चाहते हैं:", value=f"नमस्ते {client_name} जी, ")
+                url_custom = create_whatsapp_link(client_mobile, custom_txt)
+                st.link_button("✏️ 4. Send Custom Message", url_custom, use_container_width=True)
 
         st.markdown("---")
         st.markdown(f"### 📋 Payment History for FY {fin_year}:")
