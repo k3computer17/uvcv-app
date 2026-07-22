@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 # Page Configuration
-st.set_page_config(page_title="NIKA - Tax & Client Ledger", layout="wide")
+st.set_page_config(page_title="NIKA - Tax & Financial Year System", layout="wide")
 
 # Custom CSS Styling
 st.markdown("""
@@ -32,13 +32,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏢 NIKA - Client Database & Ledger System")
+st.title("🏢 NIKA - Client Database & Financial Year System")
 
 # Database Setup
 conn = sqlite3.connect('nika_clients.db', check_same_thread=False)
 c = conn.cursor()
 
-# Create Tables
+# 1. Clients Master Table
 c.execute('''
     CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,18 +48,30 @@ c.execute('''
         gst_number TEXT,
         mobile TEXT,
         address TEXT,
-        annual_fee REAL DEFAULT 0,
-        return_type TEXT,
-        income_tax_status TEXT,
-        gst_status TEXT,
         created_date TEXT
     )
 ''')
 
+# 2. Client Year-wise Fee & Return Status Table
+c.execute('''
+    CREATE TABLE IF NOT EXISTS client_years (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER,
+        financial_year TEXT,
+        annual_fee REAL DEFAULT 0,
+        return_type TEXT,
+        income_tax_status TEXT,
+        gst_status TEXT,
+        FOREIGN KEY(client_id) REFERENCES clients(id)
+    )
+''')
+
+# 3. Payments Table (With Financial Year)
 c.execute('''
     CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         client_id INTEGER,
+        financial_year TEXT,
         payment_date TEXT,
         amount_paid REAL,
         payment_mode TEXT,
@@ -69,9 +81,13 @@ c.execute('''
 ''')
 conn.commit()
 
+# Financial Years List
+FY_LIST = ["2023-2024", "2024-2025", "2025-2026", "2026-2027", "2027-2028"]
+
 # Sidebar Navigation
 menu = [
     "➕ Add New Client", 
+    "📅 Add / Update Financial Year Fee",
     "💵 Receive Payment",
     "🔍 Client Ledger & History", 
     "📊 Overall Business Report", 
@@ -81,19 +97,27 @@ choice = st.sidebar.radio("NIKA Menu", menu)
 
 # 1. Add New Client
 if choice == "➕ Add New Client":
-    st.subheader("📝 Register New Client Profile & Annual Fee")
+    st.subheader("📝 Register New Client Profile")
     
     col1, col2 = st.columns(2)
     with col1:
         name = st.text_input("Client Full Name *")
         father_name = st.text_input("Father's Name")
         mobile = st.text_input("Mobile Number")
+    
+    with col2:
         pan_number = st.text_input("PAN Card Number")
         gst_number = st.text_input("GSTIN / GST Number")
         address = st.text_area("Address")
 
-    with col2:
+    st.markdown("---")
+    st.markdown("### 📅 Initial Financial Year Details")
+    col3, col4 = st.columns(2)
+    with col3:
+        fin_year = st.selectbox("Financial Year (FY):", FY_LIST, index=1)
         annual_fee = st.number_input("Agreed Annual Fee (₹) *", min_value=0.0, step=500.0)
+    
+    with col4:
         return_type = st.selectbox("Return Type:", [
             "Income Tax Return (ITR)", 
             "GST Return (GSTR-1 / 3B)", 
@@ -103,44 +127,110 @@ if choice == "➕ Add New Client":
         income_tax_status = st.selectbox("Income Tax Status:", ["Pending", "Filed", "Not Applicable"])
         gst_status = st.selectbox("GST Return Status:", ["Pending", "Filed", "Not Applicable"])
 
-    st.markdown("---")
     if st.button("💾 Save Client Profile"):
         if name.strip() == "":
             st.error("Please enter Client Name!")
         else:
             today_date = datetime.now().strftime("%Y-%m-%d")
             c.execute('''
-                INSERT INTO clients 
-                (name, father_name, pan_number, gst_number, mobile, address, annual_fee, return_type, income_tax_status, gst_status, created_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (name.strip(), father_name, pan_number.strip().upper(), gst_number.strip().upper(), mobile, address, annual_fee, return_type, income_tax_status, gst_status, today_date))
+                INSERT INTO clients (name, father_name, pan_number, gst_number, mobile, address, created_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (name.strip(), father_name, pan_number.strip().upper(), gst_number.strip().upper(), mobile, address, today_date))
+            
+            client_id = c.lastrowid
+            
+            c.execute('''
+                INSERT INTO client_years (client_id, financial_year, annual_fee, return_type, income_tax_status, gst_status)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (client_id, fin_year, annual_fee, return_type, income_tax_status, gst_status))
+            
             conn.commit()
-            st.success(f"✅ Client '{name}' saved successfully with Annual Fee ₹{annual_fee:,.2f}!")
+            st.success(f"✅ Client '{name}' saved successfully for FY {fin_year} with Fee ₹{annual_fee:,.2f}!")
             st.rerun()
 
-# 2. Receive Payment
-elif choice == "💵 Receive Payment":
-    st.subheader("💵 Receive Fee Payment from Client")
+# 2. Add / Update Financial Year Fee for Existing Client
+elif choice == "📅 Add / Update Financial Year Fee":
+    st.subheader("📅 Manage Year-wise Fee & Return Status")
     
-    c.execute("SELECT id, name, pan_number, annual_fee FROM clients ORDER BY name ASC")
+    c.execute("SELECT id, name, pan_number FROM clients ORDER BY name ASC")
     client_rows = c.fetchall()
     
     if not client_rows:
-        st.warning("No clients found. Please add a client first.")
+        st.warning("No clients found.")
     else:
-        client_dict = {f"{row[1]} | PAN: {row[2]} (Fee: ₹{row[3]:,.2f})": row[0] for row in client_rows}
+        client_dict = {f"{row[1]} | PAN: {row[2]}": row[0] for row in client_rows}
         selected_client_str = st.selectbox("Select Client:", list(client_dict.keys()))
         selected_client_id = client_dict[selected_client_str]
         
-        c.execute("SELECT annual_fee FROM clients WHERE id = ?", (selected_client_id,))
-        total_annual_fee = c.fetchone()[0]
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=1)
         
-        c.execute("SELECT SUM(amount_paid) FROM payments WHERE client_id = ?", (selected_client_id,))
+        # Check if entry exists for this year
+        c.execute("SELECT * FROM client_years WHERE client_id = ? AND financial_year = ?", (selected_client_id, fin_year))
+        existing_rec = c.fetchone()
+        
+        default_fee = existing_rec[3] if existing_rec else 0.0
+        default_ret = existing_rec[4] if existing_rec else "Income Tax Return (ITR)"
+        default_itr = existing_rec[5] if existing_rec else "Pending"
+        default_gst = existing_rec[6] if existing_rec else "Pending"
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            annual_fee = st.number_input(f"Annual Fee for FY {fin_year} (₹):", min_value=0.0, value=float(default_fee), step=500.0)
+            return_type = st.selectbox("Return Type:", [
+                "Income Tax Return (ITR)", 
+                "GST Return (GSTR-1 / 3B)", 
+                "Both (ITR + GST)", 
+                "Accounting / Consultancy"
+            ], index=0)
+
+        with col2:
+            income_tax_status = st.selectbox("ITR Status:", ["Pending", "Filed", "Not Applicable"])
+            gst_status = st.selectbox("GST Status:", ["Pending", "Filed", "Not Applicable"])
+
+        if st.button("💾 Save / Update Year Details"):
+            if existing_rec:
+                c.execute('''
+                    UPDATE client_years 
+                    SET annual_fee = ?, return_type = ?, income_tax_status = ?, gst_status = ?
+                    WHERE client_id = ? AND financial_year = ?
+                ''', (annual_fee, return_type, income_tax_status, gst_status, selected_client_id, fin_year))
+            else:
+                c.execute('''
+                    INSERT INTO client_years (client_id, financial_year, annual_fee, return_type, income_tax_status, gst_status)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (selected_client_id, fin_year, annual_fee, return_type, income_tax_status, gst_status))
+            
+            conn.commit()
+            st.success(f"✅ Year details updated for FY {fin_year}!")
+            st.rerun()
+
+# 3. Receive Payment
+elif choice == "💵 Receive Payment":
+    st.subheader("💵 Receive Fee Payment")
+    
+    c.execute("SELECT id, name, pan_number FROM clients ORDER BY name ASC")
+    client_rows = c.fetchall()
+    
+    if not client_rows:
+        st.warning("No clients found.")
+    else:
+        client_dict = {f"{row[1]} | PAN: {row[2]}": row[0] for row in client_rows}
+        selected_client_str = st.selectbox("Select Client:", list(client_dict.keys()))
+        selected_client_id = client_dict[selected_client_str]
+        
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=1)
+        
+        # Fetch fee for selected year
+        c.execute("SELECT annual_fee FROM client_years WHERE client_id = ? AND financial_year = ?", (selected_client_id, fin_year))
+        fee_res = c.fetchone()
+        total_annual_fee = fee_res[0] if fee_res else 0.0
+        
+        c.execute("SELECT SUM(amount_paid) FROM payments WHERE client_id = ? AND financial_year = ?", (selected_client_id, fin_year))
         paid_res = c.fetchone()[0]
         total_paid = paid_res if paid_res else 0.0
         current_balance = total_annual_fee - total_paid
         
-        st.info(f"📌 **Annual Fee:** ₹{total_annual_fee:,.2f} | **Total Paid:** ₹{total_paid:,.2f} | **Current Due:** ₹{current_balance:,.2f}")
+        st.info(f"📌 **FY {fin_year} Fee:** ₹{total_annual_fee:,.2f} | **Total Paid:** ₹{total_paid:,.2f} | **Current Due:** ₹{current_balance:,.2f}")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -157,14 +247,14 @@ elif choice == "💵 Receive Payment":
                 st.error("Please enter a valid amount!")
             else:
                 c.execute('''
-                    INSERT INTO payments (client_id, payment_date, amount_paid, payment_mode, remarks)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (selected_client_id, payment_date, payment_amount, payment_mode, remarks))
+                    INSERT INTO payments (client_id, financial_year, payment_date, amount_paid, payment_mode, remarks)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (selected_client_id, fin_year, payment_date, payment_amount, payment_mode, remarks))
                 conn.commit()
                 st.success("✅ Payment recorded successfully!")
                 st.rerun()
 
-# 3. Client Ledger & History
+# 4. Client Ledger & History
 elif choice == "🔍 Client Ledger & History":
     st.subheader("🔍 Client Statement & Ledger")
     
@@ -176,21 +266,24 @@ elif choice == "🔍 Client Ledger & History":
         selected_client_label = st.selectbox("Search / Select Client:", list(client_options.keys()))
         client_id = client_options[selected_client_label]
         
-        c.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
-        client_info = c.fetchone()
-        annual_fee = client_info[7]
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=1)
+        
+        # Year info
+        c.execute("SELECT annual_fee, return_type, income_tax_status, gst_status FROM client_years WHERE client_id = ? AND financial_year = ?", (client_id, fin_year))
+        year_info = c.fetchone()
+        annual_fee = year_info[0] if year_info else 0.0
         
         df_payments = pd.read_sql_query('''
             SELECT payment_date as 'Date', amount_paid as 'Amount Paid (₹)', payment_mode as 'Mode', remarks as 'Remarks'
-            FROM payments WHERE client_id = ? ORDER BY id ASC
-        ''', conn, params=(client_id,))
+            FROM payments WHERE client_id = ? AND financial_year = ? ORDER BY id ASC
+        ''', conn, params=(client_id, fin_year))
         
         total_paid = df_payments['Amount Paid (₹)'].sum() if not df_payments.empty else 0.0
         remaining_balance = annual_fee - total_paid
         
         st.markdown("---")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Agreed Annual Fee", f"₹{annual_fee:,.2f}")
+        m1.metric(f"FY {fin_year} Agreed Fee", f"₹{annual_fee:,.2f}")
         m2.metric("Total Received", f"₹{total_paid:,.2f}")
         
         if remaining_balance > 0:
@@ -201,83 +294,83 @@ elif choice == "🔍 Client Ledger & History":
             m3.metric("Balance Clear", "₹0.00")
 
         st.markdown("---")
-        st.markdown(f"### 📋 Payment Receipts History for {client_info[1]}:")
+        st.markdown(f"### 📋 Payment History for FY {fin_year}:")
         
         if not df_payments.empty:
             st.dataframe(df_payments, use_container_width=True)
         else:
-            st.warning("No payments recorded for this client yet.")
+            st.warning("No payments recorded for this financial year yet.")
 
-# 4. Overall Business Report
+# 5. Overall Business Report
 elif choice == "📊 Overall Business Report":
     st.subheader("📊 NIKA Business Financial Dashboard")
     
-    df_clients = pd.read_sql_query("SELECT * FROM clients", conn)
+    selected_fy = st.selectbox("Filter Report by Financial Year:", FY_LIST, index=1)
     
-    if df_clients.empty:
-        st.info("No clients in database.")
+    master_df = pd.read_sql_query('''
+        SELECT 
+            c.id as 'ID',
+            c.name as 'Name',
+            c.mobile as 'Mobile',
+            c.pan_number as 'PAN',
+            COALESCE(cy.annual_fee, 0) as 'Annual Fee (₹)',
+            COALESCE(SUM(p.amount_paid), 0) as 'Received (₹)',
+            (COALESCE(cy.annual_fee, 0) - COALESCE(SUM(p.amount_paid), 0)) as 'Due (₹)',
+            COALESCE(cy.income_tax_status, 'N/A') as 'ITR Status',
+            COALESCE(cy.gst_status, 'N/A') as 'GST Status'
+        FROM clients c
+        LEFT JOIN client_years cy ON c.id = cy.client_id AND cy.financial_year = ?
+        LEFT JOIN payments p ON c.id = p.client_id AND p.financial_year = ?
+        GROUP BY c.id
+    ''', conn, params=(selected_fy, selected_fy))
+    
+    if master_df.empty:
+        st.info("No data available.")
     else:
-        total_agreed = df_clients['annual_fee'].sum()
-        total_collected = pd.read_sql_query("SELECT SUM(amount_paid) FROM payments", conn).iloc[0, 0]
-        total_collected = total_collected if total_collected else 0.0
-        total_outstanding = total_agreed - total_collected
+        total_agreed = master_df['Annual Fee (₹)'].sum()
+        total_collected = master_df['Received (₹)'].sum()
+        total_outstanding = master_df['Due (₹)'].sum()
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Clients", len(df_clients))
-        c2.metric("Total Annual Agreed", f"₹{total_agreed:,.2f}")
+        c1.metric("Total Clients", len(master_df))
+        c2.metric(f"FY {selected_fy} Total Fee", f"₹{total_agreed:,.2f}")
         c3.metric("Total Collected", f"₹{total_collected:,.2f}")
         c4.metric("Total Outstanding", f"₹{total_outstanding:,.2f}")
         
         st.markdown("---")
-        st.markdown("### 📋 Master Client Ledger")
-        
-        master_df = pd.read_sql_query('''
-            SELECT 
-                c.id as 'ID',
-                c.name as 'Name',
-                c.mobile as 'Mobile',
-                c.pan_number as 'PAN',
-                c.annual_fee as 'Annual Fee (₹)',
-                COALESCE(SUM(p.amount_paid), 0) as 'Received (₹)',
-                (c.annual_fee - COALESCE(SUM(p.amount_paid), 0)) as 'Due (₹)',
-                c.income_tax_status as 'ITR Status',
-                c.gst_status as 'GST Status'
-            FROM clients c
-            LEFT JOIN payments p ON c.id = p.client_id
-            GROUP BY c.id
-        ''', conn)
-        
+        st.markdown(f"### 📋 Master Client Ledger (FY {selected_fy})")
         st.dataframe(master_df, use_container_width=True)
 
-# 5. Delete Entry
+# 6. Delete Entry
 elif choice == "🗑️ Delete Entry":
-    st.subheader("🗑️ Delete Client or Payment Entry")
+    st.subheader("🗑️ Delete Record")
     
-    del_choice = st.radio("Select What to Delete:", ["Complete Client Profile", "Only Single Payment Entry"])
+    del_choice = st.radio("Select Option:", ["Delete Single Payment Entry", "Delete Client Profile"])
     
-    if del_choice == "Complete Client Profile":
+    if del_choice == "Delete Client Profile":
         c.execute("SELECT id, name, pan_number FROM clients")
         recs = c.fetchall()
         if recs:
             opts = {f"ID: {r[0]} | {r[1]} | PAN: {r[2]}": r[0] for r in recs}
             sel = st.selectbox("Select Client:", list(opts.keys()))
-            if st.button("❌ Delete Client & All Records"):
+            if st.button("❌ Delete Client Completely"):
                 cid = opts[sel]
                 c.execute("DELETE FROM payments WHERE client_id = ?", (cid,))
+                c.execute("DELETE FROM client_years WHERE client_id = ?", (cid,))
                 c.execute("DELETE FROM clients WHERE id = ?", (cid,))
                 conn.commit()
-                st.success("Record deleted successfully!")
+                st.success("Client completely deleted!")
                 st.rerun()
     else:
         df_p = pd.read_sql_query('''
-            SELECT p.id as 'Payment ID', c.name as 'Name', p.payment_date as 'Date', p.amount_paid as 'Amount (₹)'
+            SELECT p.id as 'Payment ID', c.name as 'Name', p.financial_year as 'FY', p.payment_date as 'Date', p.amount_paid as 'Amount (₹)'
             FROM payments p JOIN clients c ON p.client_id = c.id ORDER BY p.id DESC
         ''', conn)
         if not df_p.empty:
             st.dataframe(df_p, use_container_width=True)
             p_id = st.number_input("Enter Payment ID to Delete:", min_value=1, step=1)
-            if st.button("❌ Delete This Payment Entry"):
+            if st.button("❌ Delete Payment"):
                 c.execute("DELETE FROM payments WHERE id = ?", (p_id,))
                 conn.commit()
-                st.success("Payment record deleted!")
+                st.success("Payment entry deleted!")
                 st.rerun()
