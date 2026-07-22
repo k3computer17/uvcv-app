@@ -34,8 +34,8 @@ st.markdown("""
 
 st.title("🏢 NIKA - Client Database & Financial Year System")
 
-# Database Setup
-conn = sqlite3.connect('nika_clients.db', check_same_thread=False)
+# Database Setup - Fixed DB Name to recreate new table schema
+conn = sqlite3.connect('nika_clients_v2.db', check_same_thread=False)
 c = conn.cursor()
 
 # 1. Clients Master Table (With Username & Password Columns)
