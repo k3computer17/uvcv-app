@@ -29,32 +29,52 @@ st.markdown("""
         background: linear-gradient(90deg, #1565c0 0%, #1e88e5 100%);
         color: white;
     }
+    .gst-card {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #1e88e5;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏢 NIKA - Client Database & Financial Year System")
+st.title("🏢 NIKA - Client Database & Multi-GST Management")
 
-# Database Setup - Fixed DB Name to recreate new table schema
-conn = sqlite3.connect('nika_clients_v2.db', check_same_thread=False)
+# Database Setup
+conn = sqlite3.connect('nika_clients_v3.db', check_same_thread=False)
 c = conn.cursor()
 
-# 1. Clients Master Table (With Username & Password Columns)
+# 1. Clients Master Table (Basic Details & Income Tax Credentials)
 c.execute('''
     CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
         father_name TEXT,
         pan_number TEXT,
-        gst_number TEXT,
         mobile TEXT,
         address TEXT,
-        portal_username TEXT,
-        portal_password TEXT,
+        itr_username TEXT,
+        itr_password TEXT,
         created_date TEXT
     )
 ''')
 
-# 2. Client Year-wise Fee & Return Status Table
+# 2. Client GST Table (Supports Multiple GST per Client)
+c.execute('''
+    CREATE TABLE IF NOT EXISTS client_gst (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER,
+        gst_number TEXT,
+        gst_username TEXT,
+        gst_password TEXT,
+        trade_name TEXT,
+        FOREIGN KEY(client_id) REFERENCES clients(id)
+    )
+''')
+
+# 3. Client Year-wise Fee & Return Status Table
 c.execute('''
     CREATE TABLE IF NOT EXISTS client_years (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +88,7 @@ c.execute('''
     )
 ''')
 
-# 3. Payments Table
+# 4. Payments Table
 c.execute('''
     CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,15 +115,19 @@ menu = [
     "➕ Add New Client", 
     "📅 Add / Update Financial Year Fee",
     "💵 Receive Payment",
-    "🔍 Client Ledger & Passwords", 
+    "🔍 Client Ledger & Credentials", 
     "📊 Overall Business Report", 
     "🗑️ Delete Entry"
 ]
 choice = st.sidebar.radio("NIKA Menu", menu)
 
-# 1. Add New Client
+# Session state initialization for dynamic GST fields
+if "num_gst_fields" not in st.session_state:
+    st.session_state.num_gst_fields = 1
+
+# 1. Add New Client Profile
 if choice == "➕ Add New Client":
-    st.subheader("📝 Register New Client Profile & Portal Credentials")
+    st.subheader("📝 Register New Client Profile")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -114,11 +138,41 @@ if choice == "➕ Add New Client":
     
     with col2:
         pan_number = st.text_input("PAN Card Number")
-        gst_number = st.text_input("GSTIN / GST Number")
-        st.markdown("---")
-        st.markdown("🔐 **ITR / GST Portal Login Info:**")
-        portal_username = st.text_input("Portal User Name / ID")
-        portal_password = st.text_input("Portal Password", type="default")
+        st.markdown("🔐 **Income Tax (ITR) Portal Credentials:**")
+        itr_username = st.text_input("ITR Portal User ID / PAN")
+        itr_password = st.text_input("ITR Portal Password")
+
+    st.markdown("---")
+    st.markdown("### 🏬 GST Details (Multiple GST Support)")
+    has_gst = st.checkbox("Does this client have GST Registration?", value=True)
+    
+    gst_data = []
+    if has_gst:
+        for i in range(st.session_state.num_gst_fields):
+            st.markdown(f"**GST Registration #{i+1}:**")
+            gc1, gc2, gc3, gc4 = st.columns(4)
+            with gc1:
+                g_num = st.text_input(f"GSTIN / GST Number #{i+1}", key=f"gst_num_{i}")
+            with gc2:
+                g_user = st.text_input(f"GST User ID #{i+1}", key=f"gst_user_{i}")
+            with gc3:
+                g_pass = st.text_input(f"GST Password #{i+1}", key=f"gst_pass_{i}")
+            with gc4:
+                g_trade = st.text_input(f"Trade/Firm Name #{i+1}", key=f"gst_trade_{i}")
+            
+            if g_num.strip():
+                gst_data.append({
+                    "gst_number": g_num.strip().upper(),
+                    "gst_username": g_user.strip(),
+                    "gst_password": g_pass.strip(),
+                    "trade_name": g_trade.strip()
+                })
+        
+        b_col1, b_col2 = st.columns([1, 4])
+        with b_col1:
+            if st.button("➕ Add Another GST Number"):
+                st.session_state.num_gst_fields += 1
+                st.rerun()
 
     st.markdown("---")
     st.markdown("### 📅 Financial Year Setup")
@@ -143,24 +197,33 @@ if choice == "➕ Add New Client":
         else:
             today_date = datetime.now().strftime("%Y-%m-%d")
             c.execute('''
-                INSERT INTO clients (name, father_name, pan_number, gst_number, mobile, address, portal_username, portal_password, created_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (name.strip(), father_name, pan_number.strip().upper(), gst_number.strip().upper(), mobile, address, portal_username, portal_password, today_date))
+                INSERT INTO clients (name, father_name, pan_number, mobile, address, itr_username, itr_password, created_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (name.strip(), father_name, pan_number.strip().upper(), mobile, address, itr_username, itr_password, today_date))
             
             client_id = c.lastrowid
             
+            # Save GST entries
+            for gst_item in gst_data:
+                c.execute('''
+                    INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (client_id, gst_item["gst_number"], gst_item["gst_username"], gst_item["gst_password"], gst_item["trade_name"]))
+
+            # Save Year Fee details
             c.execute('''
                 INSERT INTO client_years (client_id, financial_year, annual_fee, return_type, income_tax_status, gst_status)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (client_id, fin_year, annual_fee, return_type, income_tax_status, gst_status))
             
             conn.commit()
-            st.success(f"✅ Client '{name}' saved successfully with Login details for FY {fin_year}!")
+            st.session_state.num_gst_fields = 1
+            st.success(f"✅ Client '{name}' saved successfully with GST and Login details for FY {fin_year}!")
             st.rerun()
 
 # 2. Add / Update Financial Year Fee
 elif choice == "📅 Add / Update Financial Year Fee":
-    st.subheader("📅 Manage Year-wise Fee & Return Status (10 Years)")
+    st.subheader("📅 Manage Year-wise Fee & Return Status")
     
     c.execute("SELECT id, name, pan_number FROM clients ORDER BY name ASC")
     client_rows = c.fetchall()
@@ -262,8 +325,8 @@ elif choice == "💵 Receive Payment":
                 st.success("✅ Payment recorded successfully!")
                 st.rerun()
 
-# 4. Client Ledger & Passwords
-elif choice == "🔍 Client Ledger & Passwords":
+# 4. Client Ledger & Credentials
+elif choice == "🔍 Client Ledger & Credentials":
     st.subheader("🔍 Client Statement & Login Credentials")
     
     c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
@@ -277,9 +340,20 @@ elif choice == "🔍 Client Ledger & Passwords":
         c.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
         c_info = c.fetchone()
         
-        # Display Credentials Box
-        st.success(f"🔑 **Portal Username:** `{c_info[7] if c_info[7] else 'N/A'}` | 🔒 **Portal Password:** `{c_info[8] if c_info[8] else 'N/A'}`")
+        # Display ITR Credentials Box
+        st.success(f"🔑 **ITR User ID:** `{c_info[6] if c_info[6] else 'N/A'}` | 🔒 **ITR Password:** `{c_info[7] if c_info[7] else 'N/A'}`")
         
+        # Display GST Credentials Box (Multiple GST Support)
+        c.execute("SELECT gst_number, gst_username, gst_password, trade_name FROM client_gst WHERE client_id = ?", (client_id,))
+        gst_records = c.fetchall()
+        
+        if gst_records:
+            st.markdown("### 🏬 GST Registration & Login Info:")
+            for g_rec in gst_records:
+                st.info(f"📌 **Trade Name:** {g_rec[3] if g_rec[3] else 'N/A'} | **GSTIN:** `{g_rec[0]}`\n\n🔑 **User ID:** `{g_rec[1]}` | 🔒 **Password:** `{g_rec[2]}`")
+        else:
+            st.warning("No GST Registered for this client.")
+
         fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
         
         c.execute("SELECT annual_fee FROM client_years WHERE client_id = ? AND financial_year = ?", (client_id, fin_year))
@@ -313,15 +387,19 @@ elif choice == "🔍 Client Ledger & Passwords":
         else:
             st.warning("No payments recorded for this financial year yet.")
             
-        with st.expander("📝 Update Portal Username & Password"):
-            with st.form("update_creds"):
-                u_name = st.text_input("Username", value=c_info[7] if c_info[7] else "")
-                u_pass = st.text_input("Password", value=c_info[8] if c_info[8] else "")
-                if st.form_submit_button("Update Credentials"):
-                    c.execute("UPDATE clients SET portal_username = ?, portal_password = ? WHERE id = ?", (u_name, u_pass, client_id))
-                    conn.commit()
-                    st.success("Credentials updated successfully!")
-                    st.rerun()
+        with st.expander("➕ Add New GST to this Client Profile"):
+            with st.form("add_new_gst_form"):
+                new_g_num = st.text_input("GSTIN Number *")
+                new_g_user = st.text_input("GST User ID")
+                new_g_pass = st.text_input("GST Password")
+                new_g_trade = st.text_input("Trade Name")
+                if st.form_submit_button("Save GST Entry"):
+                    if new_g_num.strip():
+                        c.execute("INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name) VALUES (?, ?, ?, ?, ?)",
+                                  (client_id, new_g_num.strip().upper(), new_g_user.strip(), new_g_pass.strip(), new_g_trade.strip()))
+                        conn.commit()
+                        st.success("New GST Entry added successfully!")
+                        st.rerun()
 
 # 5. Overall Business Report
 elif choice == "📊 Overall Business Report":
@@ -335,8 +413,6 @@ elif choice == "📊 Overall Business Report":
             c.name as 'Name',
             c.mobile as 'Mobile',
             c.pan_number as 'PAN',
-            c.portal_username as 'Portal User',
-            c.portal_password as 'Portal Pass',
             COALESCE(cy.annual_fee, 0) as 'Annual Fee (₹)',
             COALESCE(SUM(p.amount_paid), 0) as 'Received (₹)',
             (COALESCE(cy.annual_fee, 0) - COALESCE(SUM(p.amount_paid), 0)) as 'Due (₹)'
@@ -360,7 +436,7 @@ elif choice == "📊 Overall Business Report":
         c4.metric("Total Outstanding", f"₹{total_outstanding:,.2f}")
         
         st.markdown("---")
-        st.markdown(f"### 📋 Master Client Ledger & Credentials (FY {selected_fy})")
+        st.markdown(f"### 📋 Master Client Ledger (FY {selected_fy})")
         st.dataframe(master_df, use_container_width=True)
 
 # 6. Delete Entry
@@ -379,6 +455,7 @@ elif choice == "🗑️ Delete Entry":
                 cid = opts[sel]
                 c.execute("DELETE FROM payments WHERE client_id = ?", (cid,))
                 c.execute("DELETE FROM client_years WHERE client_id = ?", (cid,))
+                c.execute("DELETE FROM client_gst WHERE client_id = ?", (cid,))
                 c.execute("DELETE FROM clients WHERE id = ?", (cid,))
                 conn.commit()
                 st.success("Client completely deleted!")
