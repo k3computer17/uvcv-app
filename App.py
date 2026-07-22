@@ -422,20 +422,23 @@ elif choice == "💵 Receive Payment":
 elif choice == "🔍 Client Ledger & Credentials":
     st.subheader("🔍 Client Statement & Quick WhatsApp Reminders")
     
-    c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
+    c.execute("SELECT id, name, pan_number, mobile, itr_username, itr_password FROM clients ORDER BY name ASC")
     client_list = c.fetchall()
     
     if client_list:
-        client_options = {f"{c_row[1]} | PAN: {c_row[2]} | Mob: {c_row[3]}": c_row[0] for c_row in client_list}
+        client_options = {f"{c_row[1]} | PAN: {c_row[2]} | Mob: {c_row[3] if c_row[3] else 'N/A'}": c_row[0] for c_row in client_list}
         selected_client_label = st.selectbox("Search / Select Client:", list(client_options.keys()))
         client_id = client_options[selected_client_label]
         
-        c.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
+        c.execute("SELECT name, mobile, itr_username, itr_password FROM clients WHERE id = ?", (client_id,))
         c_info = c.fetchone()
-        client_name = c_info[1]
-        client_mobile = c_info[4]
         
-        st.success(f"🔑 **ITR User ID:** `{c_info[6] if c_info[6] else 'N/A'}` | 🔒 **ITR Password:** `{c_info[7] if c_info[7] else 'N/A'}`")
+        client_name = c_info[0] if c_info[0] else "Client"
+        client_mobile = c_info[1] if c_info[1] else ""
+        itr_user = c_info[2] if c_info[2] else "N/A"
+        itr_pass = c_info[3] if c_info[3] else "N/A"
+        
+        st.success(f"🔑 **ITR User ID:** `{itr_user}` | 🔒 **ITR Password:** `{itr_pass}`")
         
         c.execute("SELECT gst_number, gst_username, gst_password, trade_name FROM client_gst WHERE client_id = ?", (client_id,))
         gst_records = c.fetchall()
@@ -469,7 +472,7 @@ elif choice == "🔍 Client Ledger & Credentials":
         st.markdown("---")
         st.markdown("### 📲 Choose Reminder Option to Send on WhatsApp:")
         
-        if not client_mobile:
+        if not client_mobile or str(client_mobile).strip() == "":
             st.error("⚠️ Client Mobile Number is missing! Please edit client profile to add mobile number.")
         else:
             r1, r2 = st.columns(2)
@@ -586,3 +589,4 @@ elif choice == "🗑️ Delete Entry":
                 conn.commit()
                 st.success("Payment entry deleted!")
                 st.rerun()
+
