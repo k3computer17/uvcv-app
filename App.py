@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import urllib.parse
 
 # Page Configuration
 st.set_page_config(page_title="NIKA - Tax & Financial Year System", layout="wide")
@@ -29,24 +30,25 @@ st.markdown("""
         background: linear-gradient(90deg, #1565c0 0%, #1e88e5 100%);
         color: white;
     }
-    .gst-card {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #1e88e5;
-        margin-bottom: 10px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏢 NIKA - Client Database & Multi-GST Management")
+st.title("🏢 NIKA - Client Management & WhatsApp Reminder System")
 
-# Database Setup
-conn = sqlite3.connect('nika_clients_v3.db', check_same_thread=False)
+# Database Setup - Reconnecting to v2 to preserve existing data
+conn = sqlite3.connect('nika_clients_v2.db', check_same_thread=False)
 c = conn.cursor()
 
-# 1. Clients Master Table (Basic Details & Income Tax Credentials)
+# Auto Migration: Check and add missing columns to clients table safely
+c.execute("PRAGMA table_info(clients)")
+columns = [col[1] for col in c.fetchall()]
+
+if 'itr_username' not in columns and 'portal_username' in columns:
+    c.execute("ALTER TABLE clients RENAME COLUMN portal_username TO itr_username")
+if 'itr_password' not in columns and 'portal_password' in columns:
+    c.execute("ALTER TABLE clients RENAME COLUMN portal_password TO itr_password")
+
+# 1. Clients Master Table Schema
 c.execute('''
     CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +63,7 @@ c.execute('''
     )
 ''')
 
-# 2. Client GST Table (Supports Multiple GST per Client)
+# 2. Client GST Table (Supports Multiple GST)
 c.execute('''
     CREATE TABLE IF NOT EXISTS client_gst (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,6 +127,16 @@ choice = st.sidebar.radio("NIKA Menu", menu)
 if "num_gst_fields" not in st.session_state:
     st.session_state.num_gst_fields = 1
 
+# Helper function for WhatsApp Link Creation
+def create_whatsapp_link(mobile, message):
+    if not mobile:
+        return None
+    clean_mobile = "".join(filter(str.isdigit, str(mobile)))
+    if len(clean_mobile) == 10:
+        clean_mobile = "91" + clean_mobile
+    encoded_msg = urllib.parse.quote(message)
+    return f"https://wa.me/{clean_mobile}?text={encoded_msg}"
+
 # 1. Add New Client Profile
 if choice == "➕ Add New Client":
     st.subheader("📝 Register New Client Profile")
@@ -168,7 +180,7 @@ if choice == "➕ Add New Client":
                     "trade_name": g_trade.strip()
                 })
         
-        b_col1, b_col2 = st.columns([1, 4])
+        b_col1, _ = st.columns([1, 4])
         with b_col1:
             if st.button("➕ Add Another GST Number"):
                 st.session_state.num_gst_fields += 1
@@ -178,7 +190,7 @@ if choice == "➕ Add New Client":
     st.markdown("### 📅 Financial Year Setup")
     col3, col4 = st.columns(2)
     with col3:
-        fin_year = st.selectbox("Select Financial Year (FY):", FY_LIST, index=6) # Default 2026-2027
+        fin_year = st.selectbox("Select Financial Year (FY):", FY_LIST, index=6)
         annual_fee = st.number_input("Agreed Annual Fee (₹) *", min_value=0.0, step=500.0)
     
     with col4:
@@ -203,14 +215,12 @@ if choice == "➕ Add New Client":
             
             client_id = c.lastrowid
             
-            # Save GST entries
             for gst_item in gst_data:
                 c.execute('''
                     INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name)
                     VALUES (?, ?, ?, ?, ?)
                 ''', (client_id, gst_item["gst_number"], gst_item["gst_username"], gst_item["gst_password"], gst_item["trade_name"]))
 
-            # Save Year Fee details
             c.execute('''
                 INSERT INTO client_years (client_id, financial_year, annual_fee, return_type, income_tax_status, gst_status)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -218,7 +228,7 @@ if choice == "➕ Add New Client":
             
             conn.commit()
             st.session_state.num_gst_fields = 1
-            st.success(f"✅ Client '{name}' saved successfully with GST and Login details for FY {fin_year}!")
+            st.success(f"✅ Client '{name}' saved successfully!")
             st.rerun()
 
 # 2. Add / Update Financial Year Fee
@@ -325,9 +335,9 @@ elif choice == "💵 Receive Payment":
                 st.success("✅ Payment recorded successfully!")
                 st.rerun()
 
-# 4. Client Ledger & Credentials
+# 4. Client Ledger, Credentials & WhatsApp Reminders
 elif choice == "🔍 Client Ledger & Credentials":
-    st.subheader("🔍 Client Statement & Login Credentials")
+    st.subheader("🔍 Client Statement & WhatsApp Reminders")
     
     c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
     client_list = c.fetchall()
@@ -339,26 +349,26 @@ elif choice == "🔍 Client Ledger & Credentials":
         
         c.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
         c_info = c.fetchone()
+        client_name = c_info[1]
+        client_mobile = c_info[4]
         
-        # Display ITR Credentials Box
         st.success(f"🔑 **ITR User ID:** `{c_info[6] if c_info[6] else 'N/A'}` | 🔒 **ITR Password:** `{c_info[7] if c_info[7] else 'N/A'}`")
         
-        # Display GST Credentials Box (Multiple GST Support)
         c.execute("SELECT gst_number, gst_username, gst_password, trade_name FROM client_gst WHERE client_id = ?", (client_id,))
         gst_records = c.fetchall()
         
         if gst_records:
-            st.markdown("### 🏬 GST Registration & Login Info:")
+            st.markdown("### 🏬 GST Credentials:")
             for g_rec in gst_records:
                 st.info(f"📌 **Trade Name:** {g_rec[3] if g_rec[3] else 'N/A'} | **GSTIN:** `{g_rec[0]}`\n\n🔑 **User ID:** `{g_rec[1]}` | 🔒 **Password:** `{g_rec[2]}`")
-        else:
-            st.warning("No GST Registered for this client.")
 
         fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
         
-        c.execute("SELECT annual_fee FROM client_years WHERE client_id = ? AND financial_year = ?", (client_id, fin_year))
+        c.execute("SELECT annual_fee, income_tax_status, gst_status FROM client_years WHERE client_id = ? AND financial_year = ?", (client_id, fin_year))
         year_info = c.fetchone()
         annual_fee = year_info[0] if year_info else 0.0
+        itr_status = year_info[1] if year_info else "Pending"
+        gst_status = year_info[2] if year_info else "Pending"
         
         df_payments = pd.read_sql_query('''
             SELECT payment_date as 'Date', amount_paid as 'Amount Paid (₹)', payment_mode as 'Mode', remarks as 'Remarks'
@@ -370,15 +380,29 @@ elif choice == "🔍 Client Ledger & Credentials":
         
         st.markdown("---")
         m1, m2, m3 = st.columns(3)
-        m1.metric(f"FY {fin_year} Agreed Fee", f"₹{annual_fee:,.2f}")
+        m1.metric(f"FY {fin_year} Fee", f"₹{annual_fee:,.2f}")
         m2.metric("Total Received", f"₹{total_paid:,.2f}")
+        m3.metric("Remaining Due", f"₹{remaining_balance:,.2f}" if remaining_balance > 0 else "₹0.00")
+
+        # WhatsApp Reminder Section
+        st.markdown("---")
+        st.markdown("### 📲 Send WhatsApp Reminders:")
         
-        if remaining_balance > 0:
-            m3.metric("Remaining Due", f"₹{remaining_balance:,.2f}")
-        elif remaining_balance < 0:
-            m3.metric("Advance Received", f"₹{abs(remaining_balance):,.2f}")
-        else:
-            m3.metric("Balance Clear", "₹0.00")
+        rem_col1, rem_col2 = st.columns(2)
+        
+        with rem_col1:
+            fee_msg = f"नमस्ते {client_name} जी,\nवित्तीय वर्ष {fin_year} की आपकी टैक्स/एकाउंटिंग फ़ीस में ₹{remaining_balance:,.2f} की राशि बकाया है। कृपया शीघ्र भुगतान करने का कष्ट करें।\nधन्यवाद!\n- NIKA Tax Services"
+            wa_fee_url = create_whatsapp_link(client_mobile, fee_msg)
+            if wa_fee_url and remaining_balance > 0:
+                st.markdown(f'<a href="{wa_fee_url}" target="_blank"><button style="background-color:#25D366;color:white;padding:10px;border-radius:8px;border:none;width:100%;font-weight:bold;">💬 Send Payment Reminder</button></a>', unsafe_allow_html=True)
+            else:
+                st.caption("No Pending Fee or Mobile Number Missing.")
+
+        with rem_col2:
+            ret_msg = f"नमस्ते {client_name} जी,\nवित्तीय वर्ष {fin_year} के आपके टैक्स रिटर्न/GST फाइलिंग के दस्तावेज (Documents) लंबित हैं। कृपया जल्द से जल्द भेजें ताकि समय पर रिटर्न फाइल किया जा सके।\nधन्यवाद!\n- NIKA Tax Services"
+            wa_ret_url = create_whatsapp_link(client_mobile, ret_msg)
+            if wa_ret_url:
+                st.markdown(f'<a href="{wa_ret_url}" target="_blank"><button style="background-color:#075E54;color:white;padding:10px;border-radius:8px;border:none;width:100%;font-weight:bold;">📄 Send Return/Doc Reminder</button></a>', unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown(f"### 📋 Payment History for FY {fin_year}:")
@@ -386,20 +410,6 @@ elif choice == "🔍 Client Ledger & Credentials":
             st.dataframe(df_payments, use_container_width=True)
         else:
             st.warning("No payments recorded for this financial year yet.")
-            
-        with st.expander("➕ Add New GST to this Client Profile"):
-            with st.form("add_new_gst_form"):
-                new_g_num = st.text_input("GSTIN Number *")
-                new_g_user = st.text_input("GST User ID")
-                new_g_pass = st.text_input("GST Password")
-                new_g_trade = st.text_input("Trade Name")
-                if st.form_submit_button("Save GST Entry"):
-                    if new_g_num.strip():
-                        c.execute("INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name) VALUES (?, ?, ?, ?, ?)",
-                                  (client_id, new_g_num.strip().upper(), new_g_user.strip(), new_g_pass.strip(), new_g_trade.strip()))
-                        conn.commit()
-                        st.success("New GST Entry added successfully!")
-                        st.rerun()
 
 # 5. Overall Business Report
 elif choice == "📊 Overall Business Report":
