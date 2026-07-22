@@ -127,7 +127,7 @@ choice = st.sidebar.radio("NIKA Menu", menu)
 if "num_gst_fields" not in st.session_state:
     st.session_state.num_gst_fields = 1
 
-# Updated Helper function for Universal WhatsApp Link
+# Helper function for Universal WhatsApp Link
 def create_whatsapp_link(client_mobile, message):
     if not client_mobile:
         return None
@@ -154,14 +154,17 @@ if choice == "➕ Add New Client":
         pan_number = st.text_input("PAN Card Number")
         st.markdown("🔐 **Income Tax (ITR) Portal Credentials:**")
         itr_username = st.text_input("ITR Portal User ID / PAN")
-        itr_password = st.text_input("ITR Portal Password")
+        itr_password = st.text_input("ITR Portal Password", type="password")
 
     st.markdown("---")
-    st.markdown("### 🏬 GST Details (Multiple GST Support)")
-    has_gst = st.checkbox("Does this client have GST Registration?", value=True)
+    st.markdown("### 🏬 GST Details")
+    
+    # Checkbox option to enable/disable GST details input
+    enable_gst = st.checkbox("Does this client have GST Registration? (Enable GST Input)", value=False)
     
     gst_data = []
-    if has_gst:
+    if enable_gst:
+        st.info("💡 GST Details enabled. Enter the registration details below:")
         for i in range(st.session_state.num_gst_fields):
             st.markdown(f"**GST Registration #{i+1}:**")
             gc1, gc2, gc3, gc4 = st.columns(4)
@@ -170,7 +173,7 @@ if choice == "➕ Add New Client":
             with gc2:
                 g_user = st.text_input(f"GST User ID #{i+1}", key=f"gst_user_{i}")
             with gc3:
-                g_pass = st.text_input(f"GST Password #{i+1}", key=f"gst_pass_{i}")
+                g_pass = st.text_input(f"GST Password #{i+1}", key=f"gst_pass_{i}", type="password")
             with gc4:
                 g_trade = st.text_input(f"Trade/Firm Name #{i+1}", key=f"gst_trade_{i}")
             
@@ -203,7 +206,7 @@ if choice == "➕ Add New Client":
             "Accounting / Consultancy"
         ])
         income_tax_status = st.selectbox("Income Tax Status:", ["Pending", "Filed", "Not Applicable"])
-        gst_status = st.selectbox("GST Return Status:", ["Pending", "Filed", "Not Applicable"])
+        gst_status = st.selectbox("GST Return Status:", ["Pending", "Filed", "Not Applicable"] if enable_gst else ["Not Applicable", "Pending", "Filed"])
 
     if st.button("💾 Save Client Profile"):
         if name.strip() == "":
@@ -217,11 +220,12 @@ if choice == "➕ Add New Client":
             
             client_id = c.lastrowid
             
-            for gst_item in gst_data:
-                c.execute('''
-                    INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (client_id, gst_item["gst_number"], gst_item["gst_username"], gst_item["gst_password"], gst_item["trade_name"]))
+            if enable_gst:
+                for gst_item in gst_data:
+                    c.execute('''
+                        INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (client_id, gst_item["gst_number"], gst_item["gst_username"], gst_item["gst_password"], gst_item["trade_name"]))
 
             c.execute('''
                 INSERT INTO client_years (client_id, financial_year, annual_fee, return_type, income_tax_status, gst_status)
@@ -280,39 +284,64 @@ elif choice == "✏️ Edit Client Profile":
         c.execute("SELECT id, gst_number, gst_username, gst_password, trade_name FROM client_gst WHERE client_id = ?", (selected_client_id,))
         gst_records = c.fetchall()
         
-        if gst_records:
-            for g_rec in gst_records:
-                g_id, g_num, g_user, g_pass, g_trade = g_rec
-                with st.expander(f"✏️ Edit GST: {g_num} ({g_trade if g_trade else 'No Trade Name'})"):
-                    e_g1, e_g2, e_g3, e_g4 = st.columns(4)
-                    with e_g1:
-                        up_g_num = st.text_input("GSTIN", value=g_num if g_num else "", key=f"e_gnum_{g_id}")
-                    with e_g2:
-                        up_g_user = st.text_input("User ID", value=g_user if g_user else "", key=f"e_guser_{g_id}")
-                    with e_g3:
-                        up_g_pass = st.text_input("Password", value=g_pass if g_pass else "", key=f"e_gpass_{g_id}")
-                    with e_g4:
-                        up_g_trade = st.text_input("Trade Name", value=g_trade if g_trade else "", key=f"e_gtrade_{g_id}")
-                    
-                    b1, b2 = st.columns([1, 1])
-                    with b1:
-                        if st.button("Save GST Changes", key=f"save_g_{g_id}"):
-                            c.execute('''
-                                UPDATE client_gst 
-                                SET gst_number = ?, gst_username = ?, gst_password = ?, trade_name = ?
-                                WHERE id = ?
-                            ''', (up_g_num.strip().upper(), up_g_user, up_g_pass, up_g_trade, g_id))
-                            conn.commit()
-                            st.success("GST details updated!")
-                            st.rerun()
-                    with b2:
-                        if st.button("❌ Remove GST", key=f"del_g_{g_id}"):
-                            c.execute("DELETE FROM client_gst WHERE id = ?", (g_id,))
-                            conn.commit()
-                            st.success("GST entry removed!")
-                            st.rerun()
-        else:
-            st.info("No GST numbers added for this client yet.")
+        has_existing_gst = len(gst_records) > 0
+        enable_gst_edit = st.checkbox("Enable/Manage GST Registration for this client", value=has_existing_gst)
+        
+        if enable_gst_edit:
+            if gst_records:
+                for g_rec in gst_records:
+                    g_id, g_num, g_user, g_pass, g_trade = g_rec
+                    with st.expander(f"✏️ Edit GST: {g_num} ({g_trade if g_trade else 'No Trade Name'})"):
+                        e_g1, e_g2, e_g3, e_g4 = st.columns(4)
+                        with e_g1:
+                            up_g_num = st.text_input("GSTIN", value=g_num if g_num else "", key=f"e_gnum_{g_id}")
+                        with e_g2:
+                            up_g_user = st.text_input("User ID", value=g_user if g_user else "", key=f"e_guser_{g_id}")
+                        with e_g3:
+                            up_g_pass = st.text_input("Password", value=g_pass if g_pass else "", key=f"e_gpass_{g_id}")
+                        with e_g4:
+                            up_g_trade = st.text_input("Trade Name", value=g_trade if g_trade else "", key=f"e_gtrade_{g_id}")
+                        
+                        b1, b2 = st.columns([1, 1])
+                        with b1:
+                            if st.button("Save GST Changes", key=f"save_g_{g_id}"):
+                                c.execute('''
+                                    UPDATE client_gst 
+                                    SET gst_number = ?, gst_username = ?, gst_password = ?, trade_name = ?
+                                    WHERE id = ?
+                                ''', (up_g_num.strip().upper(), up_g_user, up_g_pass, up_g_trade, g_id))
+                                conn.commit()
+                                st.success("GST details updated!")
+                                st.rerun()
+                        with b2:
+                            if st.button("❌ Remove GST", key=f"del_g_{g_id}"):
+                                c.execute("DELETE FROM client_gst WHERE id = ?", (g_id,))
+                                conn.commit()
+                                st.success("GST entry removed!")
+                                st.rerun()
+            
+            st.markdown("➕ **Add New GST Entry:**")
+            a_col1, a_col2, a_col3, a_col4 = st.columns(4)
+            with a_col1:
+                new_gnum = st.text_input("New GSTIN", key="new_add_gnum")
+            with a_col2:
+                new_guser = st.text_input("New GST User ID", key="new_add_guser")
+            with a_col3:
+                new_gpass = st.text_input("New GST Password", key="new_add_gpass")
+            with a_col4:
+                new_gtrd = st.text_input("New Trade Name", key="new_add_gtrd")
+                
+            if st.button("💾 Save New GST Number"):
+                if new_gnum.strip():
+                    c.execute('''
+                        INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (selected_client_id, new_gnum.strip().upper(), new_guser, new_gpass, new_gtrd))
+                    conn.commit()
+                    st.success("New GST Registration added!")
+                    st.rerun()
+                else:
+                    st.error("Please enter a GSTIN!")
 
 # 3. Add / Update Financial Year Fee
 elif choice == "📅 Add / Update Financial Year Fee":
@@ -605,5 +634,3 @@ elif choice == "🗑️ Delete Entry":
                 conn.commit()
                 st.success("Payment entry deleted!")
                 st.rerun()
-
-
