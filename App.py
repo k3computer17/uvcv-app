@@ -38,7 +38,7 @@ st.title("🏢 NIKA - Client Database & Financial Year System")
 conn = sqlite3.connect('nika_clients.db', check_same_thread=False)
 c = conn.cursor()
 
-# 1. Clients Master Table
+# 1. Clients Master Table (With Username & Password Columns)
 c.execute('''
     CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +48,8 @@ c.execute('''
         gst_number TEXT,
         mobile TEXT,
         address TEXT,
+        portal_username TEXT,
+        portal_password TEXT,
         created_date TEXT
     )
 ''')
@@ -66,7 +68,7 @@ c.execute('''
     )
 ''')
 
-# 3. Payments Table (With Financial Year)
+# 3. Payments Table
 c.execute('''
     CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,15 +83,19 @@ c.execute('''
 ''')
 conn.commit()
 
-# Financial Years List
-FY_LIST = ["2023-2024", "2024-2025", "2025-2026", "2026-2027", "2027-2028"]
+# 10 Financial Years List
+FY_LIST = [
+    "2020-2021", "2021-2022", "2022-2023", "2023-2024", 
+    "2024-2025", "2025-2026", "2026-2027", "2027-2028", 
+    "2028-2029", "2029-2030", "2030-2031"
+]
 
 # Sidebar Navigation
 menu = [
     "➕ Add New Client", 
     "📅 Add / Update Financial Year Fee",
     "💵 Receive Payment",
-    "🔍 Client Ledger & History", 
+    "🔍 Client Ledger & Passwords", 
     "📊 Overall Business Report", 
     "🗑️ Delete Entry"
 ]
@@ -97,24 +103,28 @@ choice = st.sidebar.radio("NIKA Menu", menu)
 
 # 1. Add New Client
 if choice == "➕ Add New Client":
-    st.subheader("📝 Register New Client Profile")
+    st.subheader("📝 Register New Client Profile & Portal Credentials")
     
     col1, col2 = st.columns(2)
     with col1:
         name = st.text_input("Client Full Name *")
         father_name = st.text_input("Father's Name")
         mobile = st.text_input("Mobile Number")
+        address = st.text_area("Address")
     
     with col2:
         pan_number = st.text_input("PAN Card Number")
         gst_number = st.text_input("GSTIN / GST Number")
-        address = st.text_area("Address")
+        st.markdown("---")
+        st.markdown("🔐 **ITR / GST Portal Login Info:**")
+        portal_username = st.text_input("Portal User Name / ID")
+        portal_password = st.text_input("Portal Password", type="default")
 
     st.markdown("---")
-    st.markdown("### 📅 Initial Financial Year Details")
+    st.markdown("### 📅 Financial Year Setup")
     col3, col4 = st.columns(2)
     with col3:
-        fin_year = st.selectbox("Financial Year (FY):", FY_LIST, index=1)
+        fin_year = st.selectbox("Select Financial Year (FY):", FY_LIST, index=6) # Default 2026-2027
         annual_fee = st.number_input("Agreed Annual Fee (₹) *", min_value=0.0, step=500.0)
     
     with col4:
@@ -133,9 +143,9 @@ if choice == "➕ Add New Client":
         else:
             today_date = datetime.now().strftime("%Y-%m-%d")
             c.execute('''
-                INSERT INTO clients (name, father_name, pan_number, gst_number, mobile, address, created_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (name.strip(), father_name, pan_number.strip().upper(), gst_number.strip().upper(), mobile, address, today_date))
+                INSERT INTO clients (name, father_name, pan_number, gst_number, mobile, address, portal_username, portal_password, created_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (name.strip(), father_name, pan_number.strip().upper(), gst_number.strip().upper(), mobile, address, portal_username, portal_password, today_date))
             
             client_id = c.lastrowid
             
@@ -145,12 +155,12 @@ if choice == "➕ Add New Client":
             ''', (client_id, fin_year, annual_fee, return_type, income_tax_status, gst_status))
             
             conn.commit()
-            st.success(f"✅ Client '{name}' saved successfully for FY {fin_year} with Fee ₹{annual_fee:,.2f}!")
+            st.success(f"✅ Client '{name}' saved successfully with Login details for FY {fin_year}!")
             st.rerun()
 
-# 2. Add / Update Financial Year Fee for Existing Client
+# 2. Add / Update Financial Year Fee
 elif choice == "📅 Add / Update Financial Year Fee":
-    st.subheader("📅 Manage Year-wise Fee & Return Status")
+    st.subheader("📅 Manage Year-wise Fee & Return Status (10 Years)")
     
     c.execute("SELECT id, name, pan_number FROM clients ORDER BY name ASC")
     client_rows = c.fetchall()
@@ -162,9 +172,8 @@ elif choice == "📅 Add / Update Financial Year Fee":
         selected_client_str = st.selectbox("Select Client:", list(client_dict.keys()))
         selected_client_id = client_dict[selected_client_str]
         
-        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=1)
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
         
-        # Check if entry exists for this year
         c.execute("SELECT * FROM client_years WHERE client_id = ? AND financial_year = ?", (selected_client_id, fin_year))
         existing_rec = c.fetchone()
         
@@ -201,7 +210,7 @@ elif choice == "📅 Add / Update Financial Year Fee":
                 ''', (selected_client_id, fin_year, annual_fee, return_type, income_tax_status, gst_status))
             
             conn.commit()
-            st.success(f"✅ Year details updated for FY {fin_year}!")
+            st.success(f"✅ Fee & Status updated for FY {fin_year}!")
             st.rerun()
 
 # 3. Receive Payment
@@ -218,9 +227,8 @@ elif choice == "💵 Receive Payment":
         selected_client_str = st.selectbox("Select Client:", list(client_dict.keys()))
         selected_client_id = client_dict[selected_client_str]
         
-        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=1)
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
         
-        # Fetch fee for selected year
         c.execute("SELECT annual_fee FROM client_years WHERE client_id = ? AND financial_year = ?", (selected_client_id, fin_year))
         fee_res = c.fetchone()
         total_annual_fee = fee_res[0] if fee_res else 0.0
@@ -254,9 +262,9 @@ elif choice == "💵 Receive Payment":
                 st.success("✅ Payment recorded successfully!")
                 st.rerun()
 
-# 4. Client Ledger & History
-elif choice == "🔍 Client Ledger & History":
-    st.subheader("🔍 Client Statement & Ledger")
+# 4. Client Ledger & Passwords
+elif choice == "🔍 Client Ledger & Passwords":
+    st.subheader("🔍 Client Statement & Login Credentials")
     
     c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
     client_list = c.fetchall()
@@ -266,10 +274,15 @@ elif choice == "🔍 Client Ledger & History":
         selected_client_label = st.selectbox("Search / Select Client:", list(client_options.keys()))
         client_id = client_options[selected_client_label]
         
-        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=1)
+        c.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
+        c_info = c.fetchone()
         
-        # Year info
-        c.execute("SELECT annual_fee, return_type, income_tax_status, gst_status FROM client_years WHERE client_id = ? AND financial_year = ?", (client_id, fin_year))
+        # Display Credentials Box
+        st.success(f"🔑 **Portal Username:** `{c_info[7] if c_info[7] else 'N/A'}` | 🔒 **Portal Password:** `{c_info[8] if c_info[8] else 'N/A'}`")
+        
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
+        
+        c.execute("SELECT annual_fee FROM client_years WHERE client_id = ? AND financial_year = ?", (client_id, fin_year))
         year_info = c.fetchone()
         annual_fee = year_info[0] if year_info else 0.0
         
@@ -295,17 +308,26 @@ elif choice == "🔍 Client Ledger & History":
 
         st.markdown("---")
         st.markdown(f"### 📋 Payment History for FY {fin_year}:")
-        
         if not df_payments.empty:
             st.dataframe(df_payments, use_container_width=True)
         else:
             st.warning("No payments recorded for this financial year yet.")
+            
+        with st.expander("📝 Update Portal Username & Password"):
+            with st.form("update_creds"):
+                u_name = st.text_input("Username", value=c_info[7] if c_info[7] else "")
+                u_pass = st.text_input("Password", value=c_info[8] if c_info[8] else "")
+                if st.form_submit_button("Update Credentials"):
+                    c.execute("UPDATE clients SET portal_username = ?, portal_password = ? WHERE id = ?", (u_name, u_pass, client_id))
+                    conn.commit()
+                    st.success("Credentials updated successfully!")
+                    st.rerun()
 
 # 5. Overall Business Report
 elif choice == "📊 Overall Business Report":
     st.subheader("📊 NIKA Business Financial Dashboard")
     
-    selected_fy = st.selectbox("Filter Report by Financial Year:", FY_LIST, index=1)
+    selected_fy = st.selectbox("Filter Report by Financial Year:", FY_LIST, index=6)
     
     master_df = pd.read_sql_query('''
         SELECT 
@@ -313,11 +335,11 @@ elif choice == "📊 Overall Business Report":
             c.name as 'Name',
             c.mobile as 'Mobile',
             c.pan_number as 'PAN',
+            c.portal_username as 'Portal User',
+            c.portal_password as 'Portal Pass',
             COALESCE(cy.annual_fee, 0) as 'Annual Fee (₹)',
             COALESCE(SUM(p.amount_paid), 0) as 'Received (₹)',
-            (COALESCE(cy.annual_fee, 0) - COALESCE(SUM(p.amount_paid), 0)) as 'Due (₹)',
-            COALESCE(cy.income_tax_status, 'N/A') as 'ITR Status',
-            COALESCE(cy.gst_status, 'N/A') as 'GST Status'
+            (COALESCE(cy.annual_fee, 0) - COALESCE(SUM(p.amount_paid), 0)) as 'Due (₹)'
         FROM clients c
         LEFT JOIN client_years cy ON c.id = cy.client_id AND cy.financial_year = ?
         LEFT JOIN payments p ON c.id = p.client_id AND p.financial_year = ?
@@ -338,7 +360,7 @@ elif choice == "📊 Overall Business Report":
         c4.metric("Total Outstanding", f"₹{total_outstanding:,.2f}")
         
         st.markdown("---")
-        st.markdown(f"### 📋 Master Client Ledger (FY {selected_fy})")
+        st.markdown(f"### 📋 Master Client Ledger & Credentials (FY {selected_fy})")
         st.dataframe(master_df, use_container_width=True)
 
 # 6. Delete Entry
