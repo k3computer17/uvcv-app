@@ -64,7 +64,7 @@ st.markdown("""
 
 st.title("🏢 Shri Charbhuja Accountancy & NIKA Tax System")
 
-# Updated Database File Name (v3) to handle new table structure automatically
+# Helper for Database Connection (v3 created to fix schema errors)
 def get_db_connection():
     return sqlite3.connect('nika_clients_v3.db')
 
@@ -463,7 +463,6 @@ elif choice == "📑 Computation & Financial Statements":
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     with get_db_connection() as conn:
                         c = conn.cursor()
-                        # Check if entry already exists for this client and FY
                         c.execute(
                             "SELECT id FROM financial_statements WHERE client_id = ? AND financial_year = ?", 
                             (selected_client_id, selected_fy)
@@ -533,15 +532,15 @@ elif choice == "📑 Computation & Financial Statements":
                 st.write(f"**Name:** {c_info[1] or ''}")
                 st.write(f"**Father's Name:** {c_info[2] or ''}")
                 st.write(f"**PAN No.:** {c_info[3] or ''}")
-                st.write(f"**DOB / Gender:** {c_info[6] or ''} | {c_info[7] or ''}")
+                st.write(f"**DOB / Gender:** {c_info[8] or ''} | {c_info[9] or ''}")
                 st.write(f"**Address:** {c_info[5] or ''}")
             
             with col2:
                 st.markdown("**Filing & Bank Details:**")
-                st.write(f"**Email:** {c_info[8] or ''}")
-                st.write(f"**Bank:** {c_info[9] or ''}")
-                st.write(f"**A/c No.:** {c_info[11] or ''}")
-                st.write(f"**IFSC:** {c_info[10] or ''}")
+                st.write(f"**Email:** {c_info[10] or ''}")
+                st.write(f"**Bank:** {c_info[11] or ''}")
+                st.write(f"**A/c No.:** {c_info[13] or ''}")
+                st.write(f"**IFSC:** {c_info[12] or ''}")
                 st.write(f"**Acknowledgement:** {itr_ack} (Filed: {itr_date})")
 
             st.markdown("<div class='section-title'>1. Income Calculation</div>", unsafe_allow_html=True)
