@@ -2,7 +2,6 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
-import urllib.parse
 
 # Page Configuration
 st.set_page_config(page_title="NIKA & Shri Charbhuja Accountancy System", layout="wide")
@@ -52,55 +51,29 @@ st.markdown("""
         color: white;
     }
 
-    /* Print View Customization */
     @media print {
-        [data-testid="stSidebar"] {
-            display: none;
-        }
-        .stButton, .no-print {
+        [data-testid="stSidebar"], .stButton, .no-print {
             display: none !important;
         }
         .main {
             background-color: white !important;
         }
     }
-    
-    .printable-card {
-        background-color: #ffffff;
-        padding: 25px;
-        border: 2px solid #1a237e;
-        border-radius: 10px;
-        color: #000;
-        font-family: Arial, sans-serif;
-    }
-    .print-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 15px;
-    }
-    .print-table th, .print-table td {
-        border: 1px solid #ddd;
-        padding: 8px;
-        text-align: left;
-    }
-    .print-table th {
-        background-color: #f2f2f2;
-    }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("🏢 Shri Charbhuja Accountancy & NIKA Tax System")
 
-# Helper to manage DB Connection safely
+# Helper for Database Connection
 def get_db_connection():
     return sqlite3.connect('nika_clients_v2.db')
 
-# Database Initialization & Auto-Migration
+# Database Initialization
 def init_db():
     with get_db_connection() as conn:
         c = conn.cursor()
         
-        # 1. Clients Master Table
+        # 1. Clients Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS clients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,40 +94,7 @@ def init_db():
             )
         ''')
 
-        # Auto Migrations for Clients
-        c.execute("PRAGMA table_info(clients)")
-        columns = [col[1] for col in c.fetchall()]
-        if 'itr_username' not in columns and 'portal_username' in columns:
-            c.execute("ALTER TABLE clients RENAME COLUMN portal_username TO itr_username")
-        if 'itr_password' not in columns and 'portal_password' in columns:
-            c.execute("ALTER TABLE clients RENAME COLUMN portal_password TO itr_password")
-        if 'dob' not in columns:
-            c.execute("ALTER TABLE clients ADD COLUMN dob TEXT")
-        if 'gender' not in columns:
-            c.execute("ALTER TABLE clients ADD COLUMN gender TEXT")
-        if 'email' not in columns:
-            c.execute("ALTER TABLE clients ADD COLUMN email TEXT")
-        if 'bank_name' not in columns:
-            c.execute("ALTER TABLE clients ADD COLUMN bank_name TEXT")
-        if 'ifsc_code' not in columns:
-            c.execute("ALTER TABLE clients ADD COLUMN ifsc_code TEXT")
-        if 'bank_account' not in columns:
-            c.execute("ALTER TABLE clients ADD COLUMN bank_account TEXT")
-
-        # 2. Client GST Table
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS client_gst (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                client_id INTEGER,
-                gst_number TEXT,
-                gst_username TEXT,
-                gst_password TEXT,
-                trade_name TEXT,
-                FOREIGN KEY(client_id) REFERENCES clients(id)
-            )
-        ''')
-
-        # 3. Client Years Table
+        # 2. Client Years Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS client_years (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,15 +110,7 @@ def init_db():
             )
         ''')
 
-        # Migration check for client_years (Ack No & Filing Date)
-        c.execute("PRAGMA table_info(client_years)")
-        cy_columns = [col[1] for col in c.fetchall()]
-        if 'itr_ack_no' not in cy_columns:
-            c.execute("ALTER TABLE client_years ADD COLUMN itr_ack_no TEXT")
-        if 'itr_filing_date' not in cy_columns:
-            c.execute("ALTER TABLE client_years ADD COLUMN itr_filing_date TEXT")
-
-        # 4. Payments Table
+        # 3. Payments Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS payments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,31 +124,25 @@ def init_db():
             )
         ''')
 
-        # 5. Financial Statements & Computation Table
+        # 4. Dynamic Financial Statements Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS financial_statements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id INTEGER,
                 financial_year TEXT,
-                gross_turnover REAL DEFAULT 0,
-                gross_profit REAL DEFAULT 0,
-                net_profit REAL DEFAULT 0,
+                opening_stock REAL DEFAULT 0,
+                purchases REAL DEFAULT 0,
+                indirect_exp REAL DEFAULT 0,
+                sales_goods REAL DEFAULT 0,
+                other_income REAL DEFAULT 0,
+                closing_stock REAL DEFAULT 0,
                 opening_capital REAL DEFAULT 0,
-                capital_addition REAL DEFAULT 0,
                 drawings REAL DEFAULT 0,
-                closing_capital REAL DEFAULT 0,
-                total_assets REAL DEFAULT 0,
-                total_liabilities REAL DEFAULT 0,
-                income_salary REAL DEFAULT 0,
-                gross_rent REAL DEFAULT 0,
-                income_capital_gains REAL DEFAULT 0,
-                income_other_sources REAL DEFAULT 0,
-                exempt_income REAL DEFAULT 0,
-                deductions_80c REAL DEFAULT 0,
-                deductions_80d REAL DEFAULT 0,
-                other_deductions REAL DEFAULT 0,
-                gross_total_income REAL DEFAULT 0,
-                taxable_income REAL DEFAULT 0,
+                loans_liability REAL DEFAULT 0,
+                fixed_assets REAL DEFAULT 0,
+                loans_advances REAL DEFAULT 0,
+                sundry_debtors REAL DEFAULT 0,
+                cash_in_hand REAL DEFAULT 0,
                 created_at TEXT,
                 FOREIGN KEY(client_id) REFERENCES clients(id),
                 UNIQUE(client_id, financial_year)
@@ -226,13 +152,11 @@ def init_db():
 
 init_db()
 
-# Financial Years List
 FY_LIST = [
     "2020-2021", "2021-2022", "2022-2023", "2023-2024", 
     "2024-2025", "2025-2026", "2026-2027", "2027-2028"
 ]
 
-# Sidebar Navigation
 menu = [
     "➕ Register Client", 
     "✏️ Edit Client Profile",
@@ -244,30 +168,29 @@ menu = [
 ]
 choice = st.sidebar.radio("NIKA Menu", menu)
 
-if "num_gst_fields" not in st.session_state:
-    st.session_state.num_gst_fields = 1
-
-# 1. Register Client Profile
+# -----------------------------------------------------------------------------
+# 1. REGISTER CLIENT
+# -----------------------------------------------------------------------------
 if choice == "➕ Register Client":
     st.subheader("📝 Register New Client Profile")
     col1, col2 = st.columns(2)
     with col1:
         name = st.text_input("Client Full Name *")
         father_name = st.text_input("Father's Name")
-        dob = st.text_input("Date of Birth (DD/MM/YYYY)", value="25/08/1987")
+        dob = st.text_input("Date of Birth (DD/MM/YYYY)")
         gender = st.selectbox("Gender", ["MALE", "FEMALE", "OTHER"])
         mobile = st.text_input("Mobile Number")
-        email = st.text_input("Email Address", value="k3computer@gmail.com")
-        address = st.text_area("Address", value="C51 KESHAV NAGAR K.B. ROAD, ALIRAJPUR")
+        email = st.text_input("Email Address")
+        address = st.text_area("Address")
     
     with col2:
-        pan_number = st.text_input("PAN Card Number", value="BJBPB9747C")
+        pan_number = st.text_input("PAN Card Number")
         st.markdown("🔐 **ITR & Bank Details:**")
         itr_username = st.text_input("ITR Portal User ID / PAN")
         itr_password = st.text_input("ITR Portal Password", type="password")
-        bank_name = st.text_input("Bank Name", value="BANK OF BARODA, STATE BANK OF INDIA")
-        ifsc_code = st.text_input("IFSC Code", value="BARB0ALIRAJ")
-        bank_account = st.text_input("Account Number", value="06890200001749")
+        bank_name = st.text_input("Bank Name")
+        ifsc_code = st.text_input("IFSC Code")
+        bank_account = st.text_input("Account Number")
 
     st.markdown("---")
     st.markdown("### 📅 Initial Financial Year Setup")
@@ -302,7 +225,9 @@ if choice == "➕ Register Client":
             st.success(f"✅ Client '{name}' saved successfully!")
             st.rerun()
 
-# 2. Edit Client Profile
+# -----------------------------------------------------------------------------
+# 2. EDIT CLIENT PROFILE
+# -----------------------------------------------------------------------------
 elif choice == "✏️ Edit Client Profile":
     st.subheader("✏️ Edit Client Profile & Credentials")
     with get_db_connection() as conn:
@@ -322,20 +247,20 @@ elif choice == "✏️ Edit Client Profile":
         
         col1, col2 = st.columns(2)
         with col1:
-            edit_name = st.text_input("Name", value=c_info[1] if c_info[1] else "")
-            edit_father = st.text_input("Father Name", value=c_info[2] if c_info[2] else "")
-            edit_dob = st.text_input("DOB", value=c_info[8] if len(c_info) > 8 and c_info[8] else "")
-            edit_mobile = st.text_input("Mobile", value=c_info[4] if c_info[4] else "")
-            edit_email = st.text_input("Email", value=c_info[10] if len(c_info) > 10 and c_info[10] else "")
-            edit_address = st.text_area("Address", value=c_info[5] if c_info[5] else "")
+            edit_name = st.text_input("Name", value=c_info[1] or "")
+            edit_father = st.text_input("Father Name", value=c_info[2] or "")
+            edit_dob = st.text_input("DOB", value=c_info[8] or "")
+            edit_mobile = st.text_input("Mobile", value=c_info[4] or "")
+            edit_email = st.text_input("Email", value=c_info[10] or "")
+            edit_address = st.text_area("Address", value=c_info[5] or "")
         
         with col2:
-            edit_pan = st.text_input("PAN", value=c_info[3] if c_info[3] else "")
-            edit_itr_user = st.text_input("ITR User ID", value=c_info[6] if c_info[6] else "")
-            edit_itr_pass = st.text_input("ITR Password", value=c_info[7] if c_info[7] else "")
-            edit_bank = st.text_input("Bank Name", value=c_info[11] if len(c_info) > 11 and c_info[11] else "")
-            edit_ifsc = st.text_input("IFSC", value=c_info[12] if len(c_info) > 12 and c_info[12] else "")
-            edit_account = st.text_input("Account No", value=c_info[13] if len(c_info) > 13 and c_info[13] else "")
+            edit_pan = st.text_input("PAN", value=c_info[3] or "")
+            edit_itr_user = st.text_input("ITR User ID", value=c_info[6] or "")
+            edit_itr_pass = st.text_input("ITR Password", value=c_info[7] or "")
+            edit_bank = st.text_input("Bank Name", value=c_info[11] or "")
+            edit_ifsc = st.text_input("IFSC", value=c_info[12] or "")
+            edit_account = st.text_input("Account No", value=c_info[13] or "")
 
         if st.button("💾 Update Client Profile"):
             with get_db_connection() as conn:
@@ -349,7 +274,9 @@ elif choice == "✏️ Edit Client Profile":
                 conn.commit()
             st.success("✅ Profile updated successfully!")
 
-# 3. Add / Update Financial Year Fee & Filing Details
+# -----------------------------------------------------------------------------
+# 3. FY FEE & ACKNOWLEDGEMENT
+# -----------------------------------------------------------------------------
 elif choice == "📅 FY Fee & Acknowledgement":
     st.subheader("📅 Manage Annual Fee, Status & Acknowledgement Details")
     with get_db_connection() as conn:
@@ -370,8 +297,8 @@ elif choice == "📅 FY Fee & Acknowledgement":
             existing_rec = c.fetchone()
         
         default_fee = existing_rec[3] if existing_rec else 0.0
-        default_ack = existing_rec[7] if existing_rec and len(existing_rec) > 7 and existing_rec[7] else "602642800240626"
-        default_date = existing_rec[8] if existing_rec and len(existing_rec) > 8 and existing_rec[8] else "JUN 24, 2026"
+        default_ack = existing_rec[7] if existing_rec and len(existing_rec) > 7 and existing_rec[7] else ""
+        default_date = existing_rec[8] if existing_rec and len(existing_rec) > 8 and existing_rec[8] else ""
 
         col1, col2 = st.columns(2)
         with col1:
@@ -399,7 +326,9 @@ elif choice == "📅 FY Fee & Acknowledgement":
                 conn.commit()
             st.success("✅ Saved Acknowledgement & Fee Details!")
 
-# 4. Receive Payment
+# -----------------------------------------------------------------------------
+# 4. RECEIVE PAYMENT
+# -----------------------------------------------------------------------------
 elif choice == "💵 Receive Payment":
     st.subheader("💵 Receive Fee Payment")
     with get_db_connection() as conn:
@@ -432,7 +361,9 @@ elif choice == "💵 Receive Payment":
                     conn.commit()
                 st.success("✅ Payment Recorded Successfully!")
 
-# 5. Ledger & Credentials
+# -----------------------------------------------------------------------------
+# 5. LEDGER & CREDENTIALS
+# -----------------------------------------------------------------------------
 elif choice == "🔍 Client Ledger & Credentials":
     st.subheader("🔍 Client Statement & Ledger")
     with get_db_connection() as conn:
@@ -454,7 +385,9 @@ elif choice == "🔍 Client Ledger & Credentials":
         
         st.dataframe(df_payments, use_container_width=True)
 
-# 6. Balance Sheet & Financial Statements
+# -----------------------------------------------------------------------------
+# 6. COMPUTATION & DYNAMIC FINANCIAL STATEMENTS
+# -----------------------------------------------------------------------------
 elif choice == "📑 Computation & Financial Statements":
     st.markdown("<h2 class='main-header'>Shri Charbhuja Accountancy, Alirajpur</h2>", unsafe_allow_html=True)
     
@@ -479,8 +412,88 @@ elif choice == "📑 Computation & Financial Statements":
             c = conn.cursor()
             c.execute("SELECT itr_ack_no, itr_filing_date FROM client_years WHERE client_id = ? AND financial_year = ?", (selected_client_id, selected_fy))
             cy_data = c.fetchone()
-            itr_ack = cy_data[0] if cy_data and cy_data[0] else "602642800240626"
-            itr_date = cy_data[1] if cy_data and cy_data[1] else "JUN 24, 2026"
+            itr_ack = cy_data[0] if cy_data and cy_data[0] else "N/A"
+            itr_date = cy_data[1] if cy_data and cy_data[1] else "N/A"
+
+            # Fetch Financial Data
+            c.execute("SELECT * FROM financial_statements WHERE client_id = ? AND financial_year = ?", (selected_client_id, selected_fy))
+            fin_data = c.fetchone()
+
+        # Load Existing Data or Default values
+        f_op_stock = fin_data[3] if fin_data else 342520.0
+        f_purchases = fin_data[4] if fin_data else 10697958.0
+        f_indirect_exp = fin_data[5] if fin_data else 241100.0
+        f_sales_goods = fin_data[6] if fin_data else 7569600.0
+        f_other_income = fin_data[7] if fin_data else 4585200.0
+        f_cl_stock = fin_data[8] if fin_data else 310500.0
+        f_op_capital = fin_data[9] if fin_data else 4130028.0
+        f_drawings = fin_data[10] if fin_data else 50500.0
+        f_loans_liab = fin_data[11] if fin_data else 452010.0
+        f_fixed_assets = fin_data[12] if fin_data else 1696580.0
+        f_loans_adv = fin_data[13] if fin_data else 1963200.0
+        f_debtors = fin_data[14] if fin_data else 1527780.0
+        f_cash = fin_data[15] if fin_data else 217200.0
+
+        # Form to Update Financial Data Dynamically
+        with st.expander("⚙️ Click to Edit/Enter Financial Values for this Client"):
+            with st.form("fin_data_form"):
+                st.markdown("### 📊 Trading / P&L Values")
+                f_c1, f_c2 = st.columns(2)
+                with f_c1:
+                    in_op_stock = st.number_input("Opening Stock (₹):", value=float(f_op_stock))
+                    in_purchases = st.number_input("Purchases (₹):", value=float(f_purchases))
+                    in_indirect_exp = st.number_input("Indirect Expenses (₹):", value=float(f_indirect_exp))
+                with f_c2:
+                    in_sales_goods = st.number_input("Goods Sales (₹):", value=float(f_sales_goods))
+                    in_other_income = st.number_input("Other Income (₹):", value=float(f_other_income))
+                    in_cl_stock = st.number_input("Closing Stock (₹):", value=float(f_cl_stock))
+                
+                st.markdown("### ⚖️ Capital & Balance Sheet Values")
+                f_c3, f_c4 = st.columns(2)
+                with f_c3:
+                    in_op_capital = st.number_input("Opening Capital (₹):", value=float(f_op_capital))
+                    in_drawings = st.number_input("Home Expenses / Drawings (₹):", value=float(f_drawings))
+                    in_loans_liab = st.number_input("Loans Liability (₹):", value=float(f_loans_liab))
+                with f_c4:
+                    in_fixed_assets = st.number_input("Fixed Assets / Home A/c (₹):", value=float(f_fixed_assets))
+                    in_loans_adv = st.number_input("Loans & Advances Asset (₹):", value=float(f_loans_adv))
+                    in_debtors = st.number_input("Sundry Debtors (₹):", value=float(f_debtors))
+                    in_cash = st.number_input("Cash in Hand (₹):", value=float(f_cash))
+
+                if st.form_submit_button("💾 Save Financial Data"):
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    with get_db_connection() as conn:
+                        c = conn.cursor()
+                        c.execute('''
+                            INSERT INTO financial_statements (
+                                client_id, financial_year, opening_stock, purchases, indirect_exp, sales_goods, other_income, closing_stock,
+                                opening_capital, drawings, loans_liability, fixed_assets, loans_advances, sundry_debtors, cash_in_hand, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(client_id, financial_year) DO UPDATE SET
+                                opening_stock=EXCLUDED.opening_stock,
+                                purchases=EXCLUDED.purchases,
+                                indirect_exp=EXCLUDED.indirect_exp,
+                                sales_goods=EXCLUDED.sales_goods,
+                                other_income=EXCLUDED.other_income,
+                                closing_stock=EXCLUDED.closing_stock,
+                                opening_capital=EXCLUDED.opening_capital,
+                                drawings=EXCLUDED.drawings,
+                                loans_liability=EXCLUDED.loans_liability,
+                                fixed_assets=EXCLUDED.fixed_assets,
+                                loans_advances=EXCLUDED.loans_advances,
+                                sundry_debtors=EXCLUDED.sundry_debtors,
+                                cash_in_hand=EXCLUDED.cash_in_hand,
+                                created_at=EXCLUDED.created_at
+                        ''', (selected_client_id, selected_fy, in_op_stock, in_purchases, in_indirect_exp, in_sales_goods, in_other_income, in_cl_stock, in_op_capital, in_drawings, in_loans_liab, in_fixed_assets, in_loans_adv, in_debtors, in_cash, now_str))
+                        conn.commit()
+                    st.success("✅ Financial data saved successfully!")
+                    st.rerun()
+
+        # Dynamic Calculations
+        net_profit = (f_sales_goods + f_other_income + f_cl_stock) - (f_op_stock + f_purchases + f_indirect_exp)
+        closing_capital = (f_op_capital + net_profit) - f_drawings
+        total_liabilities = closing_capital + f_loans_liab
+        total_assets = f_fixed_assets + f_cl_stock + f_loans_adv + f_debtors + f_cash
 
         tab1, tab2, tab3, tab4 = st.tabs([
             "📄 Income Tax Computation", 
@@ -490,7 +503,7 @@ elif choice == "📑 Computation & Financial Statements":
         ])
 
         # -----------------------------------------------------------------------------
-        # TAB 1: COMPUTATION OF TOTAL INCOME
+        # TAB 1: COMPUTATION
         # -----------------------------------------------------------------------------
         with tab1:
             st.markdown("<h3 class='sub-header'>COMPUTATION OF TOTAL INCOME & TAX STATEMENT</h3>", unsafe_allow_html=True)
@@ -499,35 +512,41 @@ elif choice == "📑 Computation & Financial Statements":
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("**Assessee Details:**")
-                st.write(f"**Name:** {c_info[1]}")
-                st.write(f"**Father's Name:** {c_info[2]}")
-                st.write(f"**PAN No.:** {c_info[3]}")
-                st.write(f"**DOB / Gender:** {c_info[6]} | {c_info[7]}")
-                st.write(f"**Address:** {c_info[5]}")
+                st.write(f"**Name:** {c_info[1] or ''}")
+                st.write(f"**Father's Name:** {c_info[2] or ''}")
+                st.write(f"**PAN No.:** {c_info[3] or ''}")
+                st.write(f"**DOB / Gender:** {c_info[6] or ''} | {c_info[7] or ''}")
+                st.write(f"**Address:** {c_info[5] or ''}")
             
             with col2:
                 st.markdown("**Filing & Bank Details:**")
-                st.write(f"**Email:** {c_info[8]}")
-                st.write(f"**Bank:** {c_info[9]}")
-                st.write(f"**A/c No.:** {c_info[11]}")
-                st.write(f"**IFSC:** {c_info[10]}")
+                st.write(f"**Email:** {c_info[8] or ''}")
+                st.write(f"**Bank:** {c_info[9] or ''}")
+                st.write(f"**A/c No.:** {c_info[11] or ''}")
+                st.write(f"**IFSC:** {c_info[10] or ''}")
                 st.write(f"**Acknowledgement:** {itr_ack} (Filed: {itr_date})")
 
             st.markdown("<div class='section-title'>1. Income Calculation</div>", unsafe_allow_html=True)
             
             inc_data = {
                 "Head of Income": ["Profits and Gains from Business & Profession", "Income from Other Sources (Misc Income)"],
-                "Amount (₹)": ["11,83,722.00", "45,85,200.00"]
+                "Amount (₹)": [f"{net_profit:,.2f}", f"{f_other_income:,.2f}"]
             }
             st.table(pd.DataFrame(inc_data))
             
-            st.metric(label="Gross Total Income (GTI)", value="₹ 57,68,922.00")
-            st.metric(label="Total Taxable Income (u/s 288A)", value="₹ 11,83,722.00")
+            gti = net_profit + f_other_income
+            st.metric(label="Gross Total Income (GTI)", value=f"₹ {gti:,.2f}")
+            st.metric(label="Total Taxable Income (u/s 288A)", value=f"₹ {net_profit:,.2f}")
 
             st.markdown("<div class='section-title'>2. Tax Computation</div>", unsafe_allow_html=True)
+            
+            tax_val = max(0.0, (net_profit - 250000.0) * 0.05) if net_profit > 250000 else 0.0
+            rebate = tax_val if net_profit <= 500000 else 0.0
+            net_tax = tax_val - rebate
+
             tax_data = {
-                "Tax Particulars": ["Tax on ₹ 2,50,000", "Tax on Balance @ 5%", "Gross Tax Liability", "Less: Rebate u/s 87A", "Net Tax Payable", "Late Fee u/s 234F Paid"],
-                "Amount (₹)": ["0.00", "23,776.00", "23,776.00", "-23,776.00", "0.00", "5,000.00"]
+                "Tax Particulars": ["Tax on ₹ 2,50,000", f"Tax on Balance @ 5%", "Gross Tax Liability", "Less: Rebate u/s 87A", "Net Tax Payable", "Late Fee u/s 234F Paid"],
+                "Amount (₹)": ["0.00", f"{tax_val:,.2f}", f"{tax_val:,.2f}", f"-{rebate:,.2f}", f"{net_tax:,.2f}", "5,000.00"]
             }
             st.table(pd.DataFrame(tax_data))
 
@@ -535,74 +554,42 @@ elif choice == "📑 Computation & Financial Statements":
         # TAB 2: PROFIT & LOSS ACCOUNT
         # -----------------------------------------------------------------------------
         with tab2:
-            st.markdown("<h3 class='sub-header'>SHIVAY ENTERPRISES</h3>", unsafe_allow_html=True)
-            st.markdown(f"<p style='text-align: center; color: gray;'>Prop. {c_info[1]} | Profit & Loss Account (1-Apr-2020 to 31-Mar-2021)</p>", unsafe_allow_html=True)
+            st.markdown(f"<h3 class='sub-header'>{c_info[1]}</h3>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: center; color: gray;'>Profit & Loss Account for FY {selected_fy}</p>", unsafe_allow_html=True)
             
             col_exp, col_inc = st.columns(2)
-            
+            tot_exp = f_op_stock + f_purchases + f_indirect_exp + net_profit
+            tot_inc = f_sales_goods + f_other_income + f_cl_stock
+
             with col_exp:
                 st.markdown("<div class='section-title'>Debit (Expenses & Purchases)</div>", unsafe_allow_html=True)
                 pnl_debit = {
-                    "Particulars": [
-                        "To Opening Stock (Cement)", 
-                        "To Purchase Accounts (Goods)", 
-                        "To Indirect Expenses:",
-                        "   - Office & Hotel Expenses",
-                        "   - Salary Expenses",
-                        "   - Travelling Expenses",
-                        "To Net Profit"
-                    ],
-                    "Amount (₹)": [
-                        "3,42,520.00", 
-                        "10,697,958.00", 
-                        "", 
-                        "74,580.00", 
-                        "1,20,000.00", 
-                        "46,520.00", 
-                        "11,83,722.00"
-                    ]
+                    "Particulars": ["To Opening Stock", "To Purchase Accounts", "To Indirect Expenses", "To Net Profit"],
+                    "Amount (₹)": [f"{f_op_stock:,.2f}", f"{f_purchases:,.2f}", f"{f_indirect_exp:,.2f}", f"{net_profit:,.2f}"]
                 }
                 st.table(pd.DataFrame(pnl_debit))
-                st.markdown("**Total Debit:** `₹ 1,24,65,300.00`")
+                st.markdown(f"**Total Debit:** `₹ {tot_exp:,.2f}`")
 
             with col_inc:
                 st.markdown("<div class='section-title'>Credit (Incomes & Sales)</div>", unsafe_allow_html=True)
                 pnl_credit = {
-                    "Particulars": [
-                        "By Sales Accounts:", 
-                        "   - Goods Sales", 
-                        "   - Other Income", 
-                        "By Closing Stock (Cement)",
-                        "",
-                        "",
-                        ""
-                    ],
-                    "Amount (₹)": [
-                        "", 
-                        "75,69,600.00", 
-                        "45,85,200.00", 
-                        "3,10,500.00",
-                        "",
-                        "",
-                        ""
-                    ]
+                    "Particulars": ["By Sales Accounts (Goods)", "By Other Income", "By Closing Stock", ""],
+                    "Amount (₹)": [f"{f_sales_goods:,.2f}", f"{f_other_income:,.2f}", f"{f_cl_stock:,.2f}", ""]
                 }
                 st.table(pd.DataFrame(pnl_credit))
-                st.markdown("**Total Credit:** `₹ 1,24,65,300.00`")
+                st.markdown(f"**Total Credit:** `₹ {tot_inc:,.2f}`")
 
         # -----------------------------------------------------------------------------
         # TAB 3: CAPITAL ACCOUNT
         # -----------------------------------------------------------------------------
         with tab3:
             st.markdown("<h3 class='sub-header'>CAPITAL ACCOUNT STATEMENT</h3>", unsafe_allow_html=True)
-            st.caption("For the period: 01-04-2020 to 31-03-2021")
             
             cap_ledger = {
                 "Date": ["01-04-2020", "31-03-2021", "31-03-2021", "31-03-2021"],
                 "Particulars": ["By Opening Balance", "By Profit & Loss A/c (Net Profit)", "To Home Expenses (Drawings)", "To Closing Balance (Net Capital)"],
-                "Vch Type": ["—", "Journal", "Journal", "—"],
-                "Debit (₹)": ["-", "-", "50,500.00", "52,63,250.00"],
-                "Credit (₹)": ["41,30,028.00", "11,83,722.00", "-", "-"]
+                "Debit (₹)": ["-", "-", f"{f_drawings:,.2f}", f"{closing_capital:,.2f}"],
+                "Credit (₹)": [f"{f_op_capital:,.2f}", f"{net_profit:,.2f}", "-", "-"]
             }
             st.table(pd.DataFrame(cap_ledger))
 
@@ -610,59 +597,32 @@ elif choice == "📑 Computation & Financial Statements":
         # TAB 4: BALANCE SHEET
         # -----------------------------------------------------------------------------
         with tab4:
-            st.markdown("<h3 class='sub-header'>SHIVAY ENTERPRISES</h3>", unsafe_allow_html=True)
-            st.markdown(f"<p style='text-align: center; color: gray;'>Balance Sheet as at 31st March 2021</p>", unsafe_allow_html=True)
+            st.markdown(f"<h3 class='sub-header'>{c_info[1]}</h3>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: center; color: gray;'>Balance Sheet for FY {selected_fy}</p>", unsafe_allow_html=True)
             
             col_liab, col_asset = st.columns(2)
             
             with col_liab:
                 st.markdown("<div class='section-title'>Liabilities</div>", unsafe_allow_html=True)
                 bs_liab = {
-                    "Liabilities Head": [
-                        "Capital Account (Net Balance)", 
-                        "Loans & Liabilities", 
-                        "Current Liabilities", 
-                        "   - Sundry Creditors", 
-                        "   - Duties & Taxes"
-                    ],
-                    "Amount (₹)": [
-                        "52,63,250.00", 
-                        "4,52,010.00", 
-                        "0.00", 
-                        "0.00", 
-                        "0.00"
-                    ]
+                    "Liabilities Head": ["Capital Account (Net Balance)", "Loans & Liabilities"],
+                    "Amount (₹)": [f"{closing_capital:,.2f}", f"{f_loans_liab:,.2f}"]
                 }
                 st.table(pd.DataFrame(bs_liab))
-                st.markdown("**Total Liabilities:** `₹ 57,15,260.00`")
+                st.markdown(f"**Total Liabilities:** `₹ {total_liabilities:,.2f}`")
 
             with col_asset:
                 st.markdown("<div class='section-title'>Assets</div>", unsafe_allow_html=True)
                 bs_assets = {
-                    "Assets Head": [
-                        "Non-Current Assets (Home A/c)", 
-                        "Current Assets:", 
-                        "   - Closing Stock (Cement)", 
-                        "   - Loans & Advances (Asset)", 
-                        "   - Sundry Debtors", 
-                        "   - Cash-in-Hand"
-                    ],
-                    "Amount (₹)": [
-                        "16,96,580.00", 
-                        "", 
-                        "3,10,500.00", 
-                        "19,63,200.00", 
-                        "15,27,780.00", 
-                        "2,17,200.00"
-                    ]
+                    "Assets Head": ["Fixed Assets / Home A/c", "Closing Stock", "Loans & Advances (Asset)", "Sundry Debtors", "Cash-in-Hand"],
+                    "Amount (₹)": [f"{f_fixed_assets:,.2f}", f"{f_cl_stock:,.2f}", f"{f_loans_adv:,.2f}", f"{f_debtors:,.2f}", f"{f_cash:,.2f}"]
                 }
                 st.table(pd.DataFrame(bs_assets))
-                st.markdown("**Total Assets:** `₹ 57,15,260.00`")
+                st.markdown(f"**Total Assets:** `₹ {total_assets:,.2f}`")
 
-        st.markdown("---")
-        st.success("✅ कंप्यूटेशन व बैलेंस शीट डेटा पूरी तरह सिंक है।")
-
-# 7. Overall Business Report
+# -----------------------------------------------------------------------------
+# 7. OVERALL BUSINESS REPORT
+# -----------------------------------------------------------------------------
 elif choice == "📊 Overall Business Report":
     st.subheader("📊 NIKA Business Financial Dashboard")
     selected_fy = st.selectbox("Filter Report by Financial Year:", FY_LIST, index=4)
