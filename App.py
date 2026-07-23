@@ -64,9 +64,9 @@ st.markdown("""
 
 st.title("🏢 Shri Charbhuja Accountancy & NIKA Tax System")
 
-# Helper for Database Connection
+# Updated Database File Name (v3) to handle new table structure automatically
 def get_db_connection():
-    return sqlite3.connect('nika_clients_v2.db')
+    return sqlite3.connect('nika_clients_v3.db')
 
 # Database Initialization
 def init_db():
@@ -463,7 +463,7 @@ elif choice == "📑 Computation & Financial Statements":
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     with get_db_connection() as conn:
                         c = conn.cursor()
-                        # Select check to avoid SQLite ON CONFLICT UPSERT issues
+                        # Check if entry already exists for this client and FY
                         c.execute(
                             "SELECT id FROM financial_statements WHERE client_id = ? AND financial_year = ?", 
                             (selected_client_id, selected_fy)
