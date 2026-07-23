@@ -64,11 +64,18 @@ st.markdown("""
 
 st.title("🏢 Shri Charbhuja Accountancy & NIKA Tax System")
 
-# Helper for Database Connection (v3 created to fix schema errors)
+# Helper for Database Connection
 def get_db_connection():
     return sqlite3.connect('nika_clients_v3.db')
 
-# Database Initialization
+# Safe Column Helper
+def add_column_if_not_exists(cursor, table, column, col_type):
+    cursor.execute(f"PRAGMA table_info({table})")
+    columns = [row[1] for row in cursor.fetchall()]
+    if column not in columns:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+# Database Initialization & Auto Schema Upgrade
 def init_db():
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -94,6 +101,15 @@ def init_db():
             )
         ''')
 
+        # Auto-upgrade clients table if old schema exists
+        add_column_if_not_exists(c, 'clients', 'father_name', 'TEXT')
+        add_column_if_not_exists(c, 'clients', 'dob', 'TEXT')
+        add_column_if_not_exists(c, 'clients', 'gender', 'TEXT')
+        add_column_if_not_exists(c, 'clients', 'email', 'TEXT')
+        add_column_if_not_exists(c, 'clients', 'bank_name', 'TEXT')
+        add_column_if_not_exists(c, 'clients', 'ifsc_code', 'TEXT')
+        add_column_if_not_exists(c, 'clients', 'bank_account', 'TEXT')
+
         # 2. Client Years Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS client_years (
@@ -109,6 +125,8 @@ def init_db():
                 FOREIGN KEY(client_id) REFERENCES clients(id)
             )
         ''')
+        add_column_if_not_exists(c, 'client_years', 'itr_ack_no', 'TEXT')
+        add_column_if_not_exists(c, 'client_years', 'itr_filing_date', 'TEXT')
 
         # 3. Payments Table
         c.execute('''
@@ -147,6 +165,8 @@ def init_db():
                 FOREIGN KEY(client_id) REFERENCES clients(id)
             )
         ''')
+        add_column_if_not_exists(c, 'financial_statements', 'created_at', 'TEXT')
+        
         conn.commit()
 
 init_db()
@@ -241,7 +261,7 @@ elif choice == "✏️ Edit Client Profile":
         
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT * FROM clients WHERE id = ?", (selected_client_id,))
+            c.execute("SELECT id, name, father_name, pan_number, mobile, address, itr_username, itr_password, dob, gender, email, bank_name, ifsc_code, bank_account FROM clients WHERE id = ?", (selected_client_id,))
             c_info = c.fetchone()
         
         col1, col2 = st.columns(2)
