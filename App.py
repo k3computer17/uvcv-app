@@ -70,15 +70,16 @@ st.markdown("""
 
 st.title("🏢 NIKA - Client Management, WhatsApp & Financials System")
 
-# Database Connection Helper
+# Helper to manage DB Connection safely
 def get_db_connection():
     return sqlite3.connect('nika_clients_v2.db')
 
-# Database Initialization
+# Database Initialization & Auto-Migration
 def init_db():
     with get_db_connection() as conn:
         c = conn.cursor()
         
+        # 1. Clients Master Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS clients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,6 +94,15 @@ def init_db():
             )
         ''')
 
+        # Migration check for clients
+        c.execute("PRAGMA table_info(clients)")
+        columns = [col[1] for col in c.fetchall()]
+        if 'itr_username' not in columns and 'portal_username' in columns:
+            c.execute("ALTER TABLE clients RENAME COLUMN portal_username TO itr_username")
+        if 'itr_password' not in columns and 'portal_password' in columns:
+            c.execute("ALTER TABLE clients RENAME COLUMN portal_password TO itr_password")
+
+        # 2. Client GST Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS client_gst (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,6 +115,7 @@ def init_db():
             )
         ''')
 
+        # 3. Client Years Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS client_years (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,10 +125,21 @@ def init_db():
                 return_type TEXT,
                 income_tax_status TEXT,
                 gst_status TEXT,
+                itr_ack_no TEXT,
+                itr_filing_date TEXT,
                 FOREIGN KEY(client_id) REFERENCES clients(id)
             )
         ''')
 
+        # Migration check for client_years (Ack No & Filing Date)
+        c.execute("PRAGMA table_info(client_years)")
+        cy_columns = [col[1] for col in c.fetchall()]
+        if 'itr_ack_no' not in cy_columns:
+            c.execute("ALTER TABLE client_years ADD COLUMN itr_ack_no TEXT")
+        if 'itr_filing_date' not in cy_columns:
+            c.execute("ALTER TABLE client_years ADD COLUMN itr_filing_date TEXT")
+
+        # 4. Payments Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS payments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,6 +153,7 @@ def init_db():
             )
         ''')
 
+        # 5. Financial Statements & Computation Table
         c.execute('''
             CREATE TABLE IF NOT EXISTS financial_statements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,12 +187,14 @@ def init_db():
 
 init_db()
 
+# Financial Years List
 FY_LIST = [
     "2020-2021", "2021-2022", "2022-2023", "2023-2024", 
     "2024-2025", "2025-2026", "2026-2027", "2027-2028", 
     "2028-2029", "2029-2030", "2030-2031"
 ]
 
+# Sidebar Navigation
 menu = [
     "➕ Add New Client", 
     "✏️ Edit Client Profile",
@@ -196,11 +221,271 @@ def create_whatsapp_link(client_mobile, message):
 
 MY_CONTACT = "8358013017"
 
-# --- [OTHER MENU OPTIONS REMAIN THE SAME] ---
+# 1. Add New Client Profile
+if choice == "➕ Add New Client":
+    st.subheader("📝 Register New Client Profile")
+    col1, col2 = st.columns(2)
+    with col1:
+        name = st.text_input("Client Full Name *")
+        father_name = st.text_input("Father's Name")
+        mobile = st.text_input("Mobile Number")
+        address = st.text_area("Address")
+    
+    with col2:
+        pan_number = st.text_input("PAN Card Number")
+        st.markdown("🔐 **Income Tax (ITR) Portal Credentials:**")
+        itr_username = st.text_input("ITR Portal User ID / PAN")
+        itr_password = st.text_input("ITR Portal Password", type="password")
 
-# 6. FEATURE: Balance Sheet, Automatic Computation & Print/PDF Download
-if choice == "📑 Balance Sheet & Financial Statements":
-    st.subheader("📑 Client Financial Statements, Computation & Print")
+    st.markdown("---")
+    st.markdown("### 🏬 GST Details")
+    enable_gst = st.checkbox("Does this client have GST Registration?", value=False)
+    
+    gst_data = []
+    if enable_gst:
+        for i in range(st.session_state.num_gst_fields):
+            st.markdown(f"**GST Registration #{i+1}:**")
+            gc1, gc2, gc3, gc4 = st.columns(4)
+            with gc1:
+                g_num = st.text_input(f"GSTIN #{i+1}", key=f"gst_num_{i}")
+            with gc2:
+                g_user = st.text_input(f"GST User ID #{i+1}", key=f"gst_user_{i}")
+            with gc3:
+                g_pass = st.text_input(f"GST Password #{i+1}", key=f"gst_pass_{i}", type="password")
+            with gc4:
+                g_trade = st.text_input(f"Trade Name #{i+1}", key=f"gst_trade_{i}")
+            
+            if g_num.strip():
+                gst_data.append({
+                    "gst_number": g_num.strip().upper(),
+                    "gst_username": g_user.strip(),
+                    "gst_password": g_pass.strip(),
+                    "trade_name": g_trade.strip()
+                })
+        
+        if st.button("➕ Add Another GST Number"):
+            st.session_state.num_gst_fields += 1
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 📅 Financial Year Setup")
+    col3, col4 = st.columns(2)
+    with col3:
+        fin_year = st.selectbox("Select Financial Year (FY):", FY_LIST, index=6)
+        annual_fee = st.number_input("Agreed Annual Fee (₹) *", min_value=0.0, step=500.0)
+    
+    with col4:
+        return_type = st.selectbox("Return Type:", [
+            "Income Tax Return (ITR)", 
+            "GST Return (GSTR-1 / 3B)", 
+            "Both (ITR + GST)", 
+            "Accounting / Consultancy"
+        ])
+        income_tax_status = st.selectbox("Income Tax Status:", ["Pending", "Filed", "Not Applicable"])
+        gst_status = st.selectbox("GST Return Status:", ["Pending", "Filed", "Not Applicable"] if enable_gst else ["Not Applicable", "Pending", "Filed"])
+
+    if st.button("💾 Save Client Profile"):
+        if name.strip() == "":
+            st.error("Please enter Client Name!")
+        else:
+            today_date = datetime.now().strftime("%Y-%m-%d")
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute('''
+                    INSERT INTO clients (name, father_name, pan_number, mobile, address, itr_username, itr_password, created_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (name.strip(), father_name, pan_number.strip().upper(), mobile, address, itr_username, itr_password, today_date))
+                client_id = c.lastrowid
+                
+                if enable_gst:
+                    for gst_item in gst_data:
+                        c.execute('''
+                            INSERT INTO client_gst (client_id, gst_number, gst_username, gst_password, trade_name)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (client_id, gst_item["gst_number"], gst_item["gst_username"], gst_item["gst_password"], gst_item["trade_name"]))
+
+                c.execute('''
+                    INSERT INTO client_years (client_id, financial_year, annual_fee, return_type, income_tax_status, gst_status)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (client_id, fin_year, annual_fee, return_type, income_tax_status, gst_status))
+                conn.commit()
+
+            st.session_state.num_gst_fields = 1
+            st.success(f"✅ Client '{name}' saved successfully!")
+            st.rerun()
+
+# 2. Edit Client Profile
+elif choice == "✏️ Edit Client Profile":
+    st.subheader("✏️ Edit Client Details & Credentials")
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
+        client_rows = c.fetchall()
+    
+    if not client_rows:
+        st.warning("No clients found.")
+    else:
+        client_dict = {f"{row[1]} | PAN: {row[2]} | Mob: {row[3]}": row[0] for row in client_rows}
+        selected_client_str = st.selectbox("Select Client to Edit:", list(client_dict.keys()))
+        selected_client_id = client_dict[selected_client_str]
+        
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT * FROM clients WHERE id = ?", (selected_client_id,))
+            c_info = c.fetchone()
+        
+        st.markdown("### 👤 Basic Profile & ITR Credentials")
+        col1, col2 = st.columns(2)
+        with col1:
+            edit_name = st.text_input("Client Full Name *", value=c_info[1] if c_info[1] else "")
+            edit_father = st.text_input("Father's Name", value=c_info[2] if c_info[2] else "")
+            edit_mobile = st.text_input("Mobile Number", value=c_info[4] if c_info[4] else "")
+            edit_address = st.text_area("Address", value=c_info[5] if c_info[5] else "")
+        
+        with col2:
+            edit_pan = st.text_input("PAN Card Number", value=c_info[3] if c_info[3] else "")
+            edit_itr_user = st.text_input("ITR Portal User ID", value=c_info[6] if c_info[6] else "")
+            edit_itr_pass = st.text_input("ITR Portal Password", value=c_info[7] if c_info[7] else "")
+        
+        if st.button("💾 Update Basic Details"):
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute('''
+                    UPDATE clients 
+                    SET name = ?, father_name = ?, pan_number = ?, mobile = ?, address = ?, itr_username = ?, itr_password = ?
+                    WHERE id = ?
+                ''', (edit_name.strip(), edit_father, edit_pan.strip().upper(), edit_mobile, edit_address, edit_itr_user, edit_itr_pass, selected_client_id))
+                conn.commit()
+            st.success("✅ Basic Profile Updated!")
+            st.rerun()
+
+# 3. Add / Update Financial Year Fee & Filing Details
+elif choice == "📅 Add / Update Financial Year Fee":
+    st.subheader("📅 Manage Fee, Return Status & Acknowledgement Details")
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
+        client_rows = c.fetchall()
+    
+    if client_rows:
+        client_dict = {f"{row[1]} | PAN: {row[2]}": (row[0], row[1], row[3]) for row in client_rows}
+        selected_client_str = st.selectbox("Select Client:", list(client_dict.keys()))
+        selected_client_id, client_name, client_mobile = client_dict[selected_client_str]
+        
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
+        
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT * FROM client_years WHERE client_id = ? AND financial_year = ?", (selected_client_id, fin_year))
+            existing_rec = c.fetchone()
+        
+        default_fee = existing_rec[3] if existing_rec else 0.0
+        default_ret_type = existing_rec[4] if existing_rec and len(existing_rec) > 4 else "Income Tax Return (ITR)"
+        default_it_status = existing_rec[5] if existing_rec and len(existing_rec) > 5 else "Pending"
+        default_gst_status = existing_rec[6] if existing_rec and len(existing_rec) > 6 else "Not Applicable"
+        default_ack = existing_rec[7] if existing_rec and len(existing_rec) > 7 and existing_rec[7] else ""
+        default_date = existing_rec[8] if existing_rec and len(existing_rec) > 8 and existing_rec[8] else ""
+
+        col1, col2 = st.columns(2)
+        with col1:
+            annual_fee = st.number_input(f"Annual Fee for FY {fin_year} (₹):", min_value=0.0, value=float(default_fee), step=500.0)
+            return_type = st.selectbox("Return Type:", ["Income Tax Return (ITR)", "GST Return (GSTR-1 / 3B)", "Both (ITR + GST)", "Accounting / Consultancy"])
+            itr_ack_no = st.text_input("ITR Acknowledgement Number (पावती संख्या):", value=default_ack)
+
+        with col2:
+            income_tax_status = st.selectbox("ITR Status:", ["Pending", "Filed", "Not Applicable"])
+            gst_status = st.selectbox("GST Status:", ["Pending", "Filed", "Not Applicable"])
+            itr_filing_date = st.text_input("ITR Filing Date (YYYY-MM-DD):", value=default_date, help="e.g. 2024-07-31")
+
+        if st.button("💾 Save / Update Year Details"):
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                if existing_rec:
+                    c.execute('''
+                        UPDATE client_years 
+                        SET annual_fee = ?, return_type = ?, income_tax_status = ?, gst_status = ?, itr_ack_no = ?, itr_filing_date = ?
+                        WHERE client_id = ? AND financial_year = ?
+                    ''', (annual_fee, return_type, income_tax_status, gst_status, itr_ack_no, itr_filing_date, selected_client_id, fin_year))
+                else:
+                    c.execute('''
+                        INSERT INTO client_years (client_id, financial_year, annual_fee, return_type, income_tax_status, gst_status, itr_ack_no, itr_filing_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (selected_client_id, fin_year, annual_fee, return_type, income_tax_status, gst_status, itr_ack_no, itr_filing_date))
+                conn.commit()
+            st.success("✅ Acknowledgement Number, Filing Date & Financial Year Details Updated!")
+
+# 4. Receive Payment
+elif choice == "💵 Receive Payment":
+    st.subheader("💵 Receive Fee Payment")
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
+        client_rows = c.fetchall()
+    
+    if client_rows:
+        client_dict = {f"{row[1]} | PAN: {row[2]}": (row[0], row[1], row[3]) for row in client_rows}
+        selected_client_str = st.selectbox("Select Client:", list(client_dict.keys()))
+        selected_client_id, client_name, client_mobile = client_dict[selected_client_str]
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
+        
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT annual_fee FROM client_years WHERE client_id = ? AND financial_year = ?", (selected_client_id, fin_year))
+            fee_res = c.fetchone()
+            total_annual_fee = fee_res[0] if fee_res else 0.0
+            
+            c.execute("SELECT SUM(amount_paid) FROM payments WHERE client_id = ? AND financial_year = ?", (selected_client_id, fin_year))
+            paid_res = c.fetchone()[0]
+            total_paid = paid_res if paid_res else 0.0
+        
+        current_balance = total_annual_fee - total_paid
+        st.info(f"📌 **FY {fin_year} Fee:** ₹{total_annual_fee:,.2f} | **Total Paid:** ₹{total_paid:,.2f} | **Current Due:** ₹{current_balance:,.2f}")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            payment_amount = st.number_input("Amount Received (₹) *", min_value=0.0, step=100.0)
+            payment_date = st.date_input("Payment Date", datetime.now()).strftime("%Y-%m-%d")
+        with col2:
+            payment_mode = st.selectbox("Payment Mode:", ["Cash", "Online / UPI", "Net Banking / Cheque"])
+            remarks = st.text_input("Remarks / Receipt No.")
+
+        if st.button("✅ Save Payment Entry"):
+            if payment_amount > 0:
+                with get_db_connection() as conn:
+                    c = conn.cursor()
+                    c.execute('''
+                        INSERT INTO payments (client_id, financial_year, payment_date, amount_paid, payment_mode, remarks)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (selected_client_id, fin_year, payment_date, payment_amount, payment_mode, remarks))
+                    conn.commit()
+                st.success("✅ Payment Received Successfully!")
+                st.rerun()
+
+# 5. Client Ledger & Credentials
+elif choice == "🔍 Client Ledger & Credentials":
+    st.subheader("🔍 Client Statement & Quick WhatsApp Reminders")
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, name, pan_number, mobile FROM clients ORDER BY name ASC")
+        client_list = c.fetchall()
+    
+    if client_list:
+        client_options = {f"{c_row[1]} | PAN: {c_row[2]}": c_row[0] for c_row in client_list}
+        selected_client_label = st.selectbox("Search / Select Client:", list(client_options.keys()))
+        client_id = client_options[selected_client_label]
+        fin_year = st.selectbox("Select Financial Year:", FY_LIST, index=6)
+        
+        with get_db_connection() as conn:
+            df_payments = pd.read_sql_query('''
+                SELECT payment_date as 'Date', amount_paid as 'Amount Paid (₹)', payment_mode as 'Mode', remarks as 'Remarks'
+                FROM payments WHERE client_id = ? AND financial_year = ? ORDER BY id ASC
+            ''', conn, params=(client_id, fin_year))
+        
+        st.dataframe(df_payments, use_container_width=True)
+
+# 6. Balance Sheet, Automatic Computation & Print
+elif choice == "📑 Balance Sheet & Financial Statements":
+    st.subheader("📑 Client Financial Statements, Automatic Computation & Print")
     
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -220,12 +505,18 @@ if choice == "📑 Balance Sheet & Financial Statements":
         start_year = int(selected_fy.split('-')[0])
         ay_str = f"{start_year + 1}-{start_year + 2}"
         
-        # Fetch Existing Data if available
+        # Fetch Existing Financial Statement Data
         with get_db_connection() as conn:
             c = conn.cursor()
             c.execute("SELECT * FROM financial_statements WHERE client_id = ? AND financial_year = ?", (selected_client_id, selected_fy))
             fs = c.fetchone()
             
+            # Fetch Ack No & Filing Date from client_years table
+            c.execute("SELECT itr_ack_no, itr_filing_date FROM client_years WHERE client_id = ? AND financial_year = ?", (selected_client_id, selected_fy))
+            cy_data = c.fetchone()
+            itr_ack_no = cy_data[0] if cy_data and cy_data[0] else ""
+            itr_filing_date = cy_data[1] if cy_data and cy_data[1] else ""
+
         # Defaults
         gross_turnover = fs[3] if fs and len(fs) > 3 else 0.0
         gross_profit = fs[4] if fs and len(fs) > 4 else 0.0
@@ -335,9 +626,21 @@ if choice == "📑 Balance Sheet & Financial Statements":
                 <h4 style="text-align:center; margin-top:0px;">ASSESSMENT YEAR: {ay_str} | FINANCIAL YEAR: {selected_fy}</h4>
                 <hr>
                 <table style="width:100%; font-size: 14px;">
-                    <tr><td><b>NAME OF ASSESSEE:</b> {selected_client_info[1]}</td><td><b>PAN NUMBER:</b> {selected_client_info[3]}</td></tr>
-                    <tr><td><b>FATHER'S NAME:</b> {selected_client_info[2] if selected_client_info[2] else 'N/A'}</td><td><b>MOBILE:</b> {selected_client_info[4]}</td></tr>
-                    <tr><td colspan="2"><b>ADDRESS:</b> {selected_client_info[5] if selected_client_info[5] else 'N/A'}</td></tr>
+                    <tr>
+                        <td><b>NAME OF ASSESSEE:</b> {selected_client_info[1]}</td>
+                        <td><b>PAN NUMBER:</b> {selected_client_info[3]}</td>
+                    </tr>
+                    <tr>
+                        <td><b>FATHER'S NAME:</b> {selected_client_info[2] if selected_client_info[2] else 'N/A'}</td>
+                        <td><b>MOBILE:</b> {selected_client_info[4]}</td>
+                    </tr>
+                    <tr>
+                        <td><b>ACK. NO (पावती सं.):</b> {itr_ack_no if itr_ack_no else 'N/A'}</td>
+                        <td><b>FILING DATE (दाखिल तिथि):</b> {itr_filing_date if itr_filing_date else 'N/A'}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="2"><b>ADDRESS:</b> {selected_client_info[5] if selected_client_info[5] else 'N/A'}</td>
+                    </tr>
                 </table>
                 <hr>
                 <h4 style="background-color:#1a237e; color:white; padding:5px;">1. STATEMENT OF COMPUTATION OF INCOME</h4>
@@ -375,7 +678,6 @@ if choice == "📑 Balance Sheet & Financial Statements":
             with p_col1:
                 st.info("💡 **Print / Save PDF करने का तरीका:** अपने कीबोर्ड पर `Ctrl + P` दबाएं और Destination में 'Save as PDF' चुनें।")
             with p_col2:
-                # HTML Download Button
                 st.download_button(
                     label="📥 Download Printable HTML File",
                     data=html_printable,
@@ -427,3 +729,38 @@ if choice == "📑 Balance Sheet & Financial Statements":
                 ))
                 conn.commit()
             st.success("✅ Financial Statement & Computation saved successfully!")
+
+# 7. Overall Business Report
+elif choice == "📊 Overall Business Report":
+    st.subheader("📊 NIKA Business Financial Dashboard")
+    selected_fy = st.selectbox("Filter Report by Financial Year:", FY_LIST, index=6)
+    
+    with get_db_connection() as conn:
+        master_df = pd.read_sql_query('''
+            SELECT 
+                c.id as 'ID',
+                c.name as 'Name',
+                c.mobile as 'Mobile',
+                c.pan_number as 'PAN',
+                COALESCE(cy.annual_fee, 0) as 'Annual Fee (₹)',
+                COALESCE(p.total_paid, 0) as 'Received (₹)',
+                (COALESCE(cy.annual_fee, 0) - COALESCE(p.total_paid, 0)) as 'Due (₹)'
+            FROM clients c
+            LEFT JOIN client_years cy ON c.id = cy.client_id AND cy.financial_year = ?
+            LEFT JOIN (
+                SELECT client_id, SUM(amount_paid) as total_paid 
+                FROM payments 
+                WHERE financial_year = ? 
+                GROUP BY client_id
+            ) p ON c.id = p.client_id
+            ORDER BY c.name ASC
+        ''', conn, params=(selected_fy, selected_fy))
+    
+    if not master_df.empty:
+        st.dataframe(master_df, use_container_width=True)
+
+# 8. Delete Entry
+elif choice == "🗑️ Delete Entry":
+    st.subheader("🗑️ Delete Record")
+    if st.button("❌ Delete All Client Profile"):
+        st.info("Select client profile to delete from DB.")
