@@ -460,34 +460,57 @@ elif choice == "📑 Computation & Financial Statements":
                     in_debtors = st.number_input("Sundry Debtors (₹):", value=float(f_debtors))
                     in_cash = st.number_input("Cash in Hand (₹):", value=float(f_cash))
 
-                if st.form_submit_button("💾 Save Financial Data"):
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    with get_db_connection() as conn:
-                        c = conn.cursor()
-                        c.execute('''
-                            INSERT INTO financial_statements (
-                                client_id, financial_year, opening_stock, purchases, indirect_exp, sales_goods, other_income, closing_stock,
-                                opening_capital, drawings, loans_liability, fixed_assets, loans_advances, sundry_debtors, cash_in_hand, created_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ON CONFLICT(client_id, financial_year) DO UPDATE SET
-                                opening_stock=EXCLUDED.opening_stock,
-                                purchases=EXCLUDED.purchases,
-                                indirect_exp=EXCLUDED.indirect_exp,
-                                sales_goods=EXCLUDED.sales_goods,
-                                other_income=EXCLUDED.other_income,
-                                closing_stock=EXCLUDED.closing_stock,
-                                opening_capital=EXCLUDED.opening_capital,
-                                drawings=EXCLUDED.drawings,
-                                loans_liability=EXCLUDED.loans_liability,
-                                fixed_assets=EXCLUDED.fixed_assets,
-                                loans_advances=EXCLUDED.loans_advances,
-                                sundry_debtors=EXCLUDED.sundry_debtors,
-                                cash_in_hand=EXCLUDED.cash_in_hand,
-                                created_at=EXCLUDED.created_at
-                        ''', (selected_client_id, selected_fy, in_op_stock, in_purchases, in_indirect_exp, in_sales_goods, in_other_income, in_cl_stock, in_op_capital, in_drawings, in_loans_liab, in_fixed_assets, in_loans_adv, in_debtors, in_cash, now_str))
-                        conn.commit()
-                    st.success("✅ Financial data saved successfully!")
-                    st.rerun()
+               if st.form_submit_button("💾 Save Financial Data"):
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        
+        # 1. पहले जांचें कि क्या इस Client और FY का डेटा पहले से मौजूद है
+        c.execute(
+            "SELECT id FROM financial_statements WHERE client_id = ? AND financial_year = ?", 
+            (selected_client_id, selected_fy)
+        )
+        existing = c.fetchone()
+        
+        if existing:
+            # 2. अगर रिकॉर्ड मौजूद है तो UPDATE करें
+            c.execute('''
+                UPDATE financial_statements SET
+                    opening_stock = ?,
+                    purchases = ?,
+                    indirect_exp = ?,
+                    sales_goods = ?,
+                    other_income = ?,
+                    closing_stock = ?,
+                    opening_capital = ?,
+                    drawings = ?,
+                    loans_liability = ?,
+                    fixed_assets = ?,
+                    loans_advances = ?,
+                    sundry_debtors = ?,
+                    cash_in_hand = ?,
+                    created_at = ?
+                WHERE client_id = ? AND financial_year = ?
+            ''', (
+                in_op_stock, in_purchases, in_indirect_exp, in_sales_goods, in_other_income, in_cl_stock,
+                in_op_capital, in_drawings, in_loans_liab, in_fixed_assets, in_loans_adv, in_debtors, in_cash,
+                now_str, selected_client_id, selected_fy
+            ))
+        else:
+            # 3. अगर नया रिकॉर्ड है तो INSERT करें
+            c.execute('''
+                INSERT INTO financial_statements (
+                    client_id, financial_year, opening_stock, purchases, indirect_exp, sales_goods, other_income, closing_stock,
+                    opening_capital, drawings, loans_liability, fixed_assets, loans_advances, sundry_debtors, cash_in_hand, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                selected_client_id, selected_fy, in_op_stock, in_purchases, in_indirect_exp, in_sales_goods, in_other_income, in_cl_stock,
+                in_op_capital, in_drawings, in_loans_liab, in_fixed_assets, in_loans_adv, in_debtors, in_cash, now_str
+            ))
+            
+        conn.commit()
+    st.success("✅ Financial data saved successfully!")
+    st.rerun()
 
         # Dynamic Calculations
         net_profit = (f_sales_goods + f_other_income + f_cl_stock) - (f_op_stock + f_purchases + f_indirect_exp)
